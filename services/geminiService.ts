@@ -3,9 +3,13 @@ import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier
 
 // Helper para obtener la API Key de forma segura en Vite
 const getApiKey = () => {
-  // 1. Intentar con variables estándar de Vite
-  if (import.meta.env.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
-  if (import.meta.env.API_KEY) return import.meta.env.API_KEY;
+  try {
+    // 1. Intentar con variables estándar de Vite
+    // @ts-ignore
+    if (import.meta.env?.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
+    // @ts-ignore
+    if (import.meta.env?.API_KEY) return import.meta.env.API_KEY;
+  } catch (e) {}
 
   // 2. Intentar con el reemplazo de define (process.env.API_KEY)
   try {
