@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, Share2, Send, CreditCard, Lock, Calendar, User, ShieldCheck, Loader2 } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, Send, CreditCard, Lock, ShieldCheck, Smartphone, Globe } from 'lucide-react';
 import { ContentVariant, PlanDetails } from '../types';
 import { useToast } from './ui/Toast';
 
@@ -32,34 +32,41 @@ export const PaymentModal: React.FC<{
   onConfirm: () => Promise<void>;
 }> = ({ isOpen, onClose, plan, onConfirm }) => {
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<'form' | 'processing' | 'success'>('form');
+  const [step, setStep] = useState<'method' | 'form' | 'processing' | 'success'>('method');
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal' | 'payphone'>('card');
   
   // Form State
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvc, setCvc] = useState('');
   const [name, setName] = useState('');
+  
+  // PayPhone State
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [idNumber, setIdNumber] = useState('');
 
   // Reset state when opening
   useEffect(() => {
     if (isOpen) {
-      setStep('form');
+      setStep('method'); // Start at method selection
       setLoading(false);
       setCardNumber('');
       setExpiry('');
       setCvc('');
       setName('');
+      setPhoneNumber('');
+      setIdNumber('');
+      setPaymentMethod('card');
     }
   }, [isOpen]);
 
   if (!isOpen || !plan) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleProcessPayment = async () => {
     setLoading(true);
     setStep('processing');
 
-    // Simular proceso de pago seguro (2.5 segundos)
+    // Simular proceso de pago seguro (3 segundos)
     setTimeout(async () => {
       await onConfirm();
       setStep('success');
@@ -68,8 +75,13 @@ export const PaymentModal: React.FC<{
       // Cerrar modal despues de exito
       setTimeout(() => {
         onClose();
-      }, 2000);
-    }, 2500);
+      }, 2500);
+    }, 3000);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleProcessPayment();
   };
 
   // Format Card Number
@@ -91,35 +103,71 @@ export const PaymentModal: React.FC<{
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-[#020617]/80 backdrop-blur-md transition-opacity" onClick={onClose}></div>
+      <div className="absolute inset-0 bg-[#020617]/90 backdrop-blur-md transition-opacity" onClick={onClose}></div>
 
       {/* Modal Content */}
-      <div className="relative w-full max-w-md bg-[#0B0F19] border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+      <div className="relative w-full max-w-lg bg-[#0B0F19] border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
         
-        {/* Header with Gradient */}
-        <div className="relative p-6 pb-8 bg-gradient-to-br from-indigo-900/50 to-[#0B0F19] border-b border-white/5">
+        {/* Header */}
+        <div className="relative p-6 pb-6 bg-[#0B0F19] border-b border-white/5">
           <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
             <X size={20} />
           </button>
           
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-indigo-500 rounded-lg text-white shadow-lg shadow-indigo-500/30">
-              <CreditCard size={20} />
-            </div>
-            <span className="text-xs font-bold text-indigo-300 uppercase tracking-widest">Pasarela Segura</span>
+          <div className="flex items-center gap-2 mb-1">
+             <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/20 uppercase tracking-wider flex items-center gap-1">
+               <ShieldCheck size={10} /> Checkout Seguro
+             </span>
           </div>
-          <h2 className="text-2xl font-bold text-white">Suscribirse al Plan {plan.name}</h2>
-          <p className="text-slate-400 mt-1 flex items-baseline gap-1">
-            Total a pagar: <span className="text-white font-bold text-lg">{plan.price}</span> <span className="text-xs">/mes</span>
+          <h2 className="text-xl font-bold text-white">Suscripción {plan.name}</h2>
+          <p className="text-slate-400 text-sm flex items-baseline gap-1">
+            Total a pagar hoy: <span className="text-white font-bold text-lg">{plan.price}</span>
           </p>
         </div>
 
         {/* Body */}
-        <div className="p-6">
-          {step === 'form' && (
-            <form onSubmit={handleSubmit} className="space-y-5">
-              
-              {/* Card Input */}
+        <div className="p-6 bg-[#0B0F19]">
+          
+          {/* Step 1: Method Selection */}
+          {(step === 'method' || step === 'form') && (
+            <div className="mb-8">
+               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Selecciona método de pago</p>
+               <div className="grid grid-cols-3 gap-3">
+                  <button 
+                    onClick={() => { setPaymentMethod('card'); setStep('form'); }}
+                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all ${paymentMethod === 'card' ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'bg-white/5 border-transparent text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                  >
+                     <CreditCard size={24} />
+                     <span className="text-[10px] font-bold text-center">Tarjeta / Nuvei</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setPaymentMethod('payphone'); setStep('form'); }}
+                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all ${paymentMethod === 'payphone' ? 'bg-orange-500/20 border-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'bg-white/5 border-transparent text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                  >
+                     <Smartphone size={24} />
+                     <span className="text-[10px] font-bold text-center">PayPhone</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setPaymentMethod('paypal'); setStep('form'); }}
+                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all ${paymentMethod === 'paypal' ? 'bg-blue-600/20 border-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-white/5 border-transparent text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                  >
+                     <Globe size={24} />
+                     <span className="text-[10px] font-bold text-center">PayPal</span>
+                  </button>
+               </div>
+             </div>
+          )}
+
+          {/* TARJETA (Nuvei / Lemon Squeezy Simulation) */}
+          {step === 'form' && paymentMethod === 'card' && (
+            <form onSubmit={handleSubmit} className="space-y-5 animate-in slide-in-from-right-4 duration-300">
+              <div className="bg-indigo-500/5 border border-indigo-500/10 p-3 rounded-lg flex items-center gap-3 mb-2">
+                 <div className="bg-indigo-500/10 p-2 rounded-full"><Lock size={14} className="text-indigo-400"/></div>
+                 <p className="text-xs text-indigo-200">Procesado globalmente vía <strong>Lemon Squeezy</strong>.</p>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wide ml-1">Número de Tarjeta</label>
                 <div className="relative group">
@@ -133,33 +181,25 @@ export const PaymentModal: React.FC<{
                     onChange={handleCardChange}
                     className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono"
                   />
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex gap-2 opacity-50 grayscale">
-                     <div className="w-8 h-5 bg-white/10 rounded"></div> {/* Simula logo Visa/Mastercard */}
-                  </div>
                 </div>
               </div>
 
-              {/* Grid for Date/CVC */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wide ml-1">Expiración</label>
-                  <div className="relative group">
-                    <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
-                    <input 
-                      type="text" 
-                      required
-                      placeholder="MM/AA"
-                      maxLength={5}
-                      value={expiry}
-                      onChange={(e) => setExpiry(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono"
-                    />
-                  </div>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="MM/AA"
+                    maxLength={5}
+                    value={expiry}
+                    onChange={(e) => setExpiry(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono text-center"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wide ml-1">CVC</label>
-                  <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
+                  <div className="relative">
                     <input 
                       type="text" 
                       required
@@ -167,54 +207,106 @@ export const PaymentModal: React.FC<{
                       maxLength={4}
                       value={cvc}
                       onChange={(e) => setCvc(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono text-center"
                     />
+                    <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
                   </div>
                 </div>
               </div>
 
-              {/* Name Input */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wide ml-1">Nombre en la tarjeta</label>
-                <div className="relative group">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="Como aparece en el plástico"
-                    value={name}
-                    onChange={(e) => setName(e.target.value.toUpperCase())}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all"
-                  />
-                </div>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="NOMBRE APELLIDO"
+                  value={name}
+                  onChange={(e) => setName(e.target.value.toUpperCase())}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder-slate-600 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                />
               </div>
 
-              {/* Secure Badge */}
-              <div className="flex items-center justify-center gap-2 py-2">
-                 <ShieldCheck size={14} className="text-emerald-500" />
-                 <span className="text-[10px] text-slate-500">Pagos encriptados con SSL de 256-bits.</span>
-              </div>
-
-              {/* Submit Button */}
               <button 
                 type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2"
+                disabled={loading}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-500/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Pagar {plan.price}
+                {loading ? 'Procesando...' : `Pagar ${plan.price} Seguro`}
               </button>
             </form>
           )}
 
+          {/* PAYPHONE (Ecuador Local) */}
+          {step === 'form' && paymentMethod === 'payphone' && (
+             <div className="space-y-5 animate-in slide-in-from-right-4 duration-300">
+                <div className="bg-orange-500/5 border border-orange-500/10 p-3 rounded-lg flex items-center gap-3 mb-2">
+                   <div className="bg-orange-500/10 p-2 rounded-full"><Smartphone size={14} className="text-orange-400"/></div>
+                   <p className="text-xs text-orange-200">Te enviaremos una solicitud de pago a tu app <strong>PayPhone</strong>.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wide ml-1">Número Celular (Ecuador)</label>
+                  <div className="relative group">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">+593</span>
+                    <input 
+                      type="tel" 
+                      required
+                      placeholder="99 999 9999"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-14 pr-4 text-white placeholder-slate-600 outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/50 transition-all font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wide ml-1">Cédula / RUC</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="1700000000"
+                    value={idNumber}
+                    onChange={(e) => setIdNumber(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-white placeholder-slate-600 outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/50 transition-all font-mono"
+                  />
+                </div>
+
+                <button 
+                  onClick={handleProcessPayment}
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400 text-white font-bold py-4 rounded-xl shadow-lg shadow-orange-500/20 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                   {loading ? 'Enviando solicitud...' : 'Solicitar Pago en App'}
+                </button>
+             </div>
+          )}
+
+          {/* PAYPAL */}
+          {step === 'form' && paymentMethod === 'paypal' && (
+             <div className="space-y-6 animate-in slide-in-from-right-4 duration-300 text-center py-4">
+                <div className="bg-blue-500/5 border border-blue-500/10 p-4 rounded-xl mb-4">
+                   <p className="text-sm text-blue-200">Serás redirigido a PayPal para autorizar la suscripción de <strong>{plan.price}</strong>.</p>
+                </div>
+                <button 
+                  onClick={handleProcessPayment}
+                  disabled={loading}
+                  className="w-full bg-[#FFC439] hover:bg-[#ffbb2e] text-slate-900 font-bold py-4 rounded-xl shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                   {loading ? 'Redirigiendo...' : <><span className="italic font-bold text-blue-900">PayPal</span> Checkout</>}
+                </button>
+             </div>
+          )}
+
+          {/* STATES: Processing & Success */}
           {step === 'processing' && (
             <div className="py-10 flex flex-col items-center justify-center text-center space-y-4">
                <div className="relative">
-                 <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>
-                 <div className="absolute inset-0 flex items-center justify-center">
-                   <Lock size={20} className="text-indigo-400" />
-                 </div>
+                 <div className={`w-16 h-16 border-4 border-t-transparent rounded-full animate-spin ${paymentMethod === 'payphone' ? 'border-orange-500' : 'border-indigo-500'}`}></div>
                </div>
                <div>
-                 <h3 className="text-white font-bold text-lg">Procesando Pago...</h3>
+                 <h3 className="text-white font-bold text-lg">
+                    {paymentMethod === 'payphone' ? 'Esperando aprobación en App...' : 'Procesando pago...'}
+                 </h3>
                  <p className="text-slate-400 text-sm">No cierres esta ventana.</p>
                </div>
             </div>
@@ -227,7 +319,7 @@ export const PaymentModal: React.FC<{
                </div>
                <div>
                  <h3 className="text-white font-bold text-2xl">¡Pago Exitoso!</h3>
-                 <p className="text-slate-400 text-sm">Bienvenido al plan {plan.name}.</p>
+                 <p className="text-slate-400 text-sm">Tu plan {plan.name} está activo inmediatamente.</p>
                </div>
             </div>
           )}

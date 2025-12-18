@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Globe, Sparkles, BrainCircuit, Cpu } from 'lucide-react';
+import { Camera, Globe, BrainCircuit } from 'lucide-react';
 import { ToastProvider } from './components/ui/Toast';
-import { PlanTier } from './types';
 
 // Supabase Hooks
 import { useAuth } from './hooks/useAuth';
