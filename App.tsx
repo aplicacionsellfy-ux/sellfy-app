@@ -166,16 +166,27 @@ const SellfyApp: React.FC = () => {
   } = useCampaigns(session?.user?.id);
 
   useEffect(() => {
-    // Check safely if API_KEY is present in process.env
-    let hasKey = false;
-    try {
+    // Check safely for API KEY using multiple methods compatible with Vite
+    let key = '';
+    
+    // Método 1: Variables de entorno estándar de Vite
+    if (import.meta.env.VITE_API_KEY) key = import.meta.env.VITE_API_KEY;
+    else if (import.meta.env.API_KEY) key = import.meta.env.API_KEY;
+    
+    // Método 2: Inyección de define (process.env.API_KEY)
+    if (!key) {
+      try {
         // @ts-ignore
-        if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-            hasKey = true;
-        }
-    } catch(e) {}
+        // Vite reemplaza esto por el string literal si existe en .env
+        if (process.env.API_KEY) key = process.env.API_KEY;
+      } catch (e) {
+        // Ignorar ReferenceError si process no está definido
+      }
+    }
 
-    if (!hasKey) {
+    // Verificar si encontramos alguna llave válida
+    if (!key || key === 'undefined') {
+      console.error("API Key faltante. Asegúrate de tener un archivo .env con API_KEY");
       setApiKeyMissing(true);
     }
   }, []);

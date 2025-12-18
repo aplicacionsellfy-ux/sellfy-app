@@ -1,9 +1,28 @@
 import { GoogleGenAI } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
-// Inicialización del cliente usando la variable de entorno
+// Helper para obtener la API Key de forma segura en Vite
+const getApiKey = () => {
+  // 1. Intentar con variables estándar de Vite
+  if (import.meta.env.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
+  if (import.meta.env.API_KEY) return import.meta.env.API_KEY;
+
+  // 2. Intentar con el reemplazo de define (process.env.API_KEY)
+  try {
+    // @ts-ignore
+    // Si process.env.API_KEY fue reemplazado por Vite con el string de la clave, esto funcionará.
+    // Si no fue reemplazado, process lanzará error en navegador, lo capturamos.
+    if (process.env.API_KEY) return process.env.API_KEY;
+  } catch (e) {
+    return undefined;
+  }
+  return undefined;
+};
+
+// Inicialización del cliente
+const apiKey = getApiKey();
 // @ts-ignore
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key-to-prevent-crash' });
 
 const cleanJsonText = (text: string | undefined): string => {
   if (!text) return '{}';

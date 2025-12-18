@@ -97,7 +97,6 @@ export function useProfile(userId: string | undefined) {
   };
 
   // Actualizar Plan
-  // Ahora solo recibe el planId, los créditos se calculan automáticamente de CONSTANTS
   const upgradePlan = async (newPlan: PlanTier) => {
     if (!userId) return;
     
@@ -107,14 +106,14 @@ export function useProfile(userId: string | undefined) {
         return;
     }
 
-    const newMaxCredits = planDetails.credits;
+    const newCredits = planDetails.credits;
     
     // Al hacer upgrade, reseteamos los créditos al máximo del nuevo plan (Bonus de bienvenida)
-    setSubscription({ plan: newPlan, credits: newMaxCredits, maxCredits: newMaxCredits });
+    setSubscription({ plan: newPlan, credits: newCredits, maxCredits: newCredits });
 
     const { error } = await supabase
       .from('profiles')
-      .update({ plan: newPlan, credits: newMaxCredits })
+      .update({ plan: newPlan, credits: newCredits })
       .eq('id', userId);
       
     if (error) addToast("Error actualizando plan", "error");
