@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
 // --- 1. CONFIGURACIÓN ROBUSTA DE LA API KEY ---
