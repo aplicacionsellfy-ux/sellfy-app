@@ -105,7 +105,6 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
 
   // Selección de Modelo:
   // gemini-2.5-flash-image es el estándar actual (Nano Banana).
-  // Es rápido y maneja bien las referencias de imagen.
   const modelName = 'gemini-2.5-flash-image';
   
   // Ajuste de calidad en el prompt según el plan
@@ -185,8 +184,6 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
     "Creative: Artistic composition with dramatic lighting",
     "Detail: Close-up macro shot emphasizing quality"
   ];
-
-  const variants: ContentVariant[] = [];
 
   // Ejecución en paralelo para velocidad
   const promises = angles.map(async (angle, index) => {
