@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
 // Inicialización del cliente usando la variable de entorno
@@ -75,9 +75,13 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
 
   // Selección de modelo basada en el plan (Priorizamos calidad)
   // gemini-2.5-flash-image es muy rápido y bueno.
-  // gemini-3-pro-image-preview es excelente para detalles complejos.
   const modelName = 'gemini-2.5-flash-image'; 
   
+  // Ajuste de calidad basado en el plan (Uso de la variable 'plan' para corregir error TS6133)
+  const qualityBoost = plan === 'pro' 
+    ? "Masterpiece, 8k resolution, ultra-detailed, ray tracing, cinematic lighting" 
+    : "High quality, professional lighting, sharp focus, 4k";
+
   // Prompt de Imagen Altamente Detallado
   let promptText = `
     Professional advertising photography of ${productData.name}.
@@ -86,6 +90,7 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
     - Shot Type: ${angleDescription}
     - Style: ${visualStyle} aesthetic.
     - Context: ${contentType}.
+    - Quality: ${qualityBoost}.
     
     BRANDING & COLORS (CRITICAL):
     - Primary Color: ${settings.primaryColor} (Use in props, background accents, or lighting).
@@ -93,7 +98,7 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
     - The image must feel cohesive with the brand "${settings.name}".
 
     LIGHTING & QUALITY:
-    - Professional studio lighting, soft shadows, 8k resolution, highly detailed, photorealistic.
+    - Professional studio lighting, soft shadows, highly detailed, photorealistic.
     - Focus: Sharp focus on the product: ${productData.name}.
     - Vibe: ${settings.tone}.
   `;
@@ -153,8 +158,6 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
     "Creative: Artistic composition with dynamic lighting and shadows",
     "Detail: Close-up macro shot emphasizing quality and texture"
   ];
-
-  const variants: ContentVariant[] = [];
 
   // Generamos en paralelo para velocidad, pero manejamos errores individualmente
   const promises = angles.map(async (angle, index) => {
