@@ -1,11 +1,9 @@
-
 import { useState, useEffect } from 'react';
 import { get, set } from 'idb-keyval';
 import { useToast } from '../components/ui/Toast';
 
 export function useIdbState<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
   const [state, setState] = useState<T>(initialValue);
-  const [isInitialized, setIsInitialized] = useState(false);
   const { addToast } = useToast();
 
   useEffect(() => {
@@ -14,10 +12,8 @@ export function useIdbState<T>(key: string, initialValue: T): [T, (value: T | ((
       if (mounted && val !== undefined) {
         setState(val as T);
       }
-      setIsInitialized(true);
     }).catch(err => {
       console.error('IDB Get Error', err);
-      setIsInitialized(true);
     });
     
     return () => { mounted = false; };

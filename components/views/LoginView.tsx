@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Camera, Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, ArrowLeft, Sparkles } from 'lucide-react';
+import { Camera, Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../ui/Toast';
 

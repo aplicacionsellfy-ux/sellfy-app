@@ -13,7 +13,7 @@ try {
 const ai = new GoogleGenAI({ apiKey });
 
 const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
-  const { contentType, platform, visualStyle, productData } = state;
+  const { platform, productData } = state;
   const audience = productData.targetAudience || settings.targetAudience;
 
   const prompt = `
@@ -73,6 +73,8 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
 const generateVariantImage = async (state: WizardState, settings: BusinessSettings, angleDescription: string, plan: PlanTier): Promise<string | null> => {
   const { contentType, platform, visualStyle, productData } = state;
   
+  if (!platform) return null;
+
   // CONDITIONAL LOGIC BASED ON PLAN
   // Pro plan gets the high-end model and richer prompt keywords
   const isPro = plan === 'pro';

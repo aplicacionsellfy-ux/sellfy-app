@@ -40,7 +40,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
   });
 
   const [result, setResult] = useState<CampaignResult | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const nextStep = () => setState(prev => ({ ...prev, step: prev.step + 1 }));
   const prevStep = () => setState(prev => ({ ...prev, step: prev.step - 1 }));
@@ -80,7 +79,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
     }
 
     nextStep(); 
-    setIsGenerating(true);
     
     try {
       // Pass the current plan to the generator to adjust quality/model
@@ -94,8 +92,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
       console.error(e);
       addToast("Hubo un error generando el contenido. Intenta de nuevo.", "error");
       prevStep();
-    } finally {
-      setIsGenerating(false);
     }
   };
 

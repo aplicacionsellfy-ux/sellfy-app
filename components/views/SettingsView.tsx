@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { Briefcase, Link as LinkIcon, Users, Palette, Save } from 'lucide-react';
-import { BusinessSettings } from '../../src/types';
+import { BusinessSettings } from '../../types';
 import { useToast } from '../ui/Toast';
 
 interface SettingsViewProps {
