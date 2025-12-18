@@ -1,71 +1,69 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
-let apiKey = '';
-try {
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-     // @ts-ignore
-     apiKey = process.env.API_KEY;
-  }
-} catch (e) {}
+// Inicialización del cliente usando la variable de entorno
+// @ts-ignore
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const ai = new GoogleGenAI({ apiKey });
+const cleanJsonText = (text: string | undefined): string => {
+  if (!text) return '{}';
+  // Eliminar bloques de código markdown ```json y ``` si existen
+  return text.replace(/```json/g, '').replace(/```/g, '').trim();
+};
 
 const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   const { platform, productData } = state;
   const audience = productData.targetAudience || settings.targetAudience;
 
   const prompt = `
-    You are a World-Class Copywriter for a ${settings.industry} brand named "${settings.name}".
+    Role: Expert Copywriter for "${settings.name}" (${settings.industry}).
+    Task: Write a social media caption for product "${productData.name}".
+    Angle: ${angleDescription}.
     
-    GOAL: Write a caption for "${productData.name}" matching angle: "${angleDescription}".
-    
-    CONTEXT:
+    Context:
     - Platform: ${platform}
     - Tone: ${settings.tone}
     - Audience: ${audience}
-    - Benefit: ${productData.benefit}
+    - Key Benefit: ${productData.benefit}
     ${productData.price ? `- Price: ${productData.price}` : ''}
     ${productData.promoDetails ? `- Promo: ${productData.promoDetails}` : ''}
 
-    STRICT RULES:
-    1. Use AIDA framework.
-    2. Use emojis.
-    3. 5 EXACT lowercase hashtags.
-    4. Optimized length for ${platform}.
-    5. No "Attention:", "Interest:" labels.
+    Requirements:
+    1. Use AIDA structure (Attention, Interest, Desire, Action).
+    2. Use emojis naturally.
+    3. Include exactly 5 hashtags.
+    4. NO markdown formatting in the output JSON.
+    5. Language: Spanish (Español).
 
-    Output JSON: { "copy": "string", "hashtags": ["string"] }
+    Output Schema (JSON only):
+    { 
+      "copy": "The full caption text here", 
+      "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"] 
+    }
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-latest', // Modelo rápido y eficiente para texto
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            copy: { type: Type.STRING },
-            hashtags: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ['copy', 'hashtags']
-        }
       }
     });
 
-    const result = JSON.parse(response.text || '{}');
+    const cleanText = cleanJsonText(response.text);
+    const result = JSON.parse(cleanText);
+
     return {
-      copy: result.copy || `¡Increíble ${productData.name}! ✨\n\n${productData.benefit}\n\n¡Consíguelo ya! 👇`,
-      hashtags: result.hashtags || ["#sellfy", "#business", "#growth", "#viral", "#marketing"]
+      copy: result.copy || `¡Descubre ${productData.name}! ✨\n\n${productData.benefit}\n\n¡Haz tu pedido hoy mismo!`,
+      hashtags: result.hashtags || ["#emprendimiento", "#producto", "#oferta", "#novedad", "#sellfy"]
     };
   } catch (error) {
-    console.error("Error generating copy variant:", error);
+    console.error("Error generating copy:", error);
+    // Fallback básico si falla la IA
     return {
-      copy: `${productData.name} ✨\n\n${productData.benefit}.\n\n¡Compra ahora! 🛍️`,
-      hashtags: ["#promo", "#deal", "#shop", "#new", "#trending"]
+      copy: `✨ ${productData.name.toUpperCase()} ✨\n\n${productData.benefit}.\n\nUna opción perfecta para ${audience}.\n\n👇 ¡Consíguelo ahora!`,
+      hashtags: ["#promo", "#nuevo", "#tendencia", "#calidad", "#tiendaonline"]
     };
   }
 };
@@ -75,105 +73,119 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
   
   if (!platform) return null;
 
-  // CONDITIONAL LOGIC BASED ON PLAN
-  // Pro plan gets the high-end model and richer prompt keywords
-  const isPro = plan === 'pro';
+  // Selección de modelo basada en el plan (Priorizamos calidad)
+  // gemini-2.5-flash-image es muy rápido y bueno.
+  // gemini-3-pro-image-preview es excelente para detalles complejos.
+  const modelName = 'gemini-2.5-flash-image'; 
   
-  // Model Selection
-  // gemini-3-pro-image-preview handles 4K and complex prompts better
-  // gemini-2.5-flash-image is faster and good for standard usage
-  const modelName = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-  
-  // Quality Keywords
-  const qualityKeywords = isPro 
-    ? "Masterpiece, 8k resolution, highly detailed, ultra-realistic texture, ray tracing, studio lighting" 
-    : "Standard resolution, professional lighting, clean focus, web quality";
+  // Prompt de Imagen Altamente Detallado
+  let promptText = `
+    Professional advertising photography of ${productData.name}.
+    
+    VISUAL SETTINGS:
+    - Shot Type: ${angleDescription}
+    - Style: ${visualStyle} aesthetic.
+    - Context: ${contentType}.
+    
+    BRANDING & COLORS (CRITICAL):
+    - Primary Color: ${settings.primaryColor} (Use in props, background accents, or lighting).
+    - Secondary Color: ${settings.secondaryColor} (Subtle details).
+    - The image must feel cohesive with the brand "${settings.name}".
 
-  let promptText = `Professional product photography of ${productData.name}. 
-  Context: ${contentType}. 
-  Style: ${visualStyle}. 
-  Composition: ${angleDescription}.
-  Feature: ${productData.benefit}.
+    LIGHTING & QUALITY:
+    - Professional studio lighting, soft shadows, 8k resolution, highly detailed, photorealistic.
+    - Focus: Sharp focus on the product: ${productData.name}.
+    - Vibe: ${settings.tone}.
+  `;
   
-  Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
-  Vibe: Professional ${settings.industry}.
-  Quality Level: ${qualityKeywords}.`;
-  
+  // Ajuste de aspecto según plataforma
   if (platform.includes('Stories') || platform.includes('Catalog')) {
-     promptText += " Vertical 9:16 aspect ratio composition.";
+     promptText += " Vertical aspect ratio (9:16), ensure product is centered vertically.";
+  } else {
+     promptText += " Square aspect ratio (1:1), perfect framing.";
   }
 
-  // Image Config based on Plan
-  const imageConfig = isPro 
-    ? { imageSize: "1K" } // gemini-3-pro supports setting size, we default to 1K but prompt implies quality
-    : {}; // flash models don't support size param as strictly
+  // Si hay imagen base, modificamos el prompt
+  const parts: any[] = [];
+  if (productData.baseImage) {
+    const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+      parts.push({
+        inlineData: {
+          mimeType: matches[1],
+          data: matches[2]
+        }
+      });
+      promptText = `Product Reference Included. Transform this product into a ${visualStyle} professional shot. KEEP the product recognizable but improve lighting and background using brand colors ${settings.primaryColor} and ${settings.secondaryColor}. ${promptText}`;
+    }
+  }
+
+  parts.push({ text: promptText });
 
   try {
-    const parts: any[] = [];
-
-    if (productData.baseImage) {
-      const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        parts.push({
-          inlineData: {
-            mimeType: matches[1],
-            data: matches[2]
-          }
-        });
-        promptText = `Transform reference image into ${visualStyle} shot. Colors: ${settings.primaryColor}, ${settings.secondaryColor}. ${promptText}`;
-      }
-    }
-
-    parts.push({ text: promptText });
-
     const response = await ai.models.generateContent({
       model: modelName,
       contents: { parts },
-      // @ts-ignore - Some configs might be preview specific
-      config: isPro ? { imageConfig } : {}
+      config: {
+        // No configuramos imageConfig para flash-image ya que a veces causa conflictos con ciertos params
+      }
     });
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+    // Buscar la parte de la imagen en la respuesta
+    if (response.candidates?.[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData && part.inlineData.data) {
+          return `data:image/png;base64,${part.inlineData.data}`;
+        }
       }
     }
   } catch (error) {
-    console.error(`Error generating image with model ${modelName}:`, error);
+    console.error(`Error generating image (${modelName}):`, error);
   }
   return null;
 };
 
 export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
+  // Definimos 4 ángulos distintos para variedad real
   const angles = [
-    "Front view, centered hero shot, minimalist",
-    "Lifestyle context, product in use",
-    "Close-up macro detail shot",
-    "Creative artistic composition"
+    "Hero shot: Frontal, centered, minimalist background matching brand colors",
+    "Lifestyle: The product being used in a realistic environment",
+    "Creative: Artistic composition with dynamic lighting and shadows",
+    "Detail: Close-up macro shot emphasizing quality and texture"
   ];
 
   const variants: ContentVariant[] = [];
 
-  for (let i = 0; i < angles.length; i++) {
-    const angle = angles[i];
-    const [img, txt] = await Promise.all([
-      generateVariantImage(state, settings, angle, plan),
-      generateVariantCopy(state, settings, angle)
-    ]);
+  // Generamos en paralelo para velocidad, pero manejamos errores individualmente
+  const promises = angles.map(async (angle, index) => {
+    try {
+      const [img, txt] = await Promise.all([
+        generateVariantImage(state, settings, angle, plan),
+        generateVariantCopy(state, settings, angle)
+      ]);
 
-    variants.push({
-      id: `var-${Date.now()}-${i}`,
-      image: img || `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(state.productData.name || 'Producto')}`,
-      copy: txt.copy,
-      hashtags: txt.hashtags,
-      angle: angle
-    } as ContentVariant);
-  }
+      return {
+        id: `var-${Date.now()}-${index}`,
+        image: img || `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(state.productData.name || 'Error Gen')}`,
+        copy: txt.copy,
+        hashtags: txt.hashtags,
+        angle: angle
+      } as ContentVariant;
+    } catch (e) {
+      console.error("Error in variant generation", e);
+      return null;
+    }
+  });
+
+  const results = await Promise.all(promises);
+  
+  // Filtramos nulos por si acaso
+  const validVariants = results.filter((v): v is ContentVariant => v !== null);
 
   return {
     id: `camp-${Date.now()}`,
     timestamp: Date.now(),
     platform: state.platform!,
-    variants: variants
+    variants: validVariants
   };
 };
