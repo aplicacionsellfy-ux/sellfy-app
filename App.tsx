@@ -166,24 +166,29 @@ const SellfyApp: React.FC = () => {
   } = useCampaigns(session?.user?.id);
 
   useEffect(() => {
-    // Check safely if API_KEY is present
     let hasKey = false;
     
-    try {
-        // @ts-ignore
-        if (import.meta.env?.VITE_API_KEY || import.meta.env?.API_KEY) {
-            hasKey = true;
-        }
-    } catch(e) {}
+    // Método 1: Variables de entorno estándar de Vite
+    // @ts-ignore
+    if (import.meta.env?.VITE_API_KEY || import.meta.env?.API_KEY) {
+        hasKey = true;
+    }
 
+    // Método 2: Inyección de define (process.env.API_KEY)
+    // No verificamos 'typeof process' porque 'process' no existe en el navegador,
+    // pero si Vite reemplazó el string, esta condición se evaluará como: if ("tu-api-key")
     if (!hasKey) {
-        // Fallback check for process.env
         try {
             // @ts-ignore
-            if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+            if (process.env.API_KEY) {
                 hasKey = true;
             }
-        } catch(e) {}
+        } catch(e) {
+            // Si Vite NO reemplazó la variable (porque no existe en .env),
+            // el acceso a process.env lanzará ReferenceError.
+            // Esto es esperado si falta la clave.
+            console.warn("API Key no detectada en process.env");
+        }
     }
 
     if (!hasKey) {
