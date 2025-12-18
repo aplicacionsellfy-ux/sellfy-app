@@ -175,23 +175,17 @@ const SellfyApp: React.FC = () => {
     }
 
     // Método 2: Inyección de define (process.env.API_KEY)
-    // No verificamos 'typeof process' porque 'process' no existe en el navegador,
-    // pero si Vite reemplazó el string, esta condición se evaluará como: if ("tu-api-key")
     if (!hasKey) {
         try {
             // @ts-ignore
             if (process.env.API_KEY) {
                 hasKey = true;
             }
-        } catch(e) {
-            // Si Vite NO reemplazó la variable (porque no existe en .env),
-            // el acceso a process.env lanzará ReferenceError.
-            // Esto es esperado si falta la clave.
-            console.warn("API Key no detectada en process.env");
-        }
+        } catch(e) {}
     }
 
     if (!hasKey) {
+      console.warn("Sellfy: No se detectó API KEY en App.tsx");
       setApiKeyMissing(true);
     }
   }, []);
