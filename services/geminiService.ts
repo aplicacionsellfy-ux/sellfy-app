@@ -1,7 +1,7 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
-// --- 1. CONFIGURACIÓN SEGURA DE LA API KEY ---
+// --- CONFIGURACIÓN API KEY ---
 const getApiKey = () => {
   let key = '';
   // @ts-ignore
@@ -27,256 +27,191 @@ const apiKey = getApiKey();
 // @ts-ignore
 const ai = new GoogleGenAI({ apiKey: apiKey || 'no-key-found' });
 
-// --- CONFIGURACIÓN DE SEGURIDAD (CRÍTICO) ---
-// Esto evita que la IA bloquee productos como "suplementos", "bikinis", "cremas", etc.
-const SAFETY_SETTINGS = [
+// --- SEGURIDAD TEXTO ---
+const TEXT_SAFETY_SETTINGS = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
   { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-// --- UTILIDADES ---
 const cleanJsonText = (text: string | undefined): string => {
   if (!text) return '{}';
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
 };
 
-// --- FUNCIÓN PARA SELECCIONAR MODELO SEGÚN PLAN ---
-const getModelByPlan = (plan: PlanTier, isImage: boolean = false): string => {
-  if (isImage) {
-    // Modelos de imagen según plan
-    switch (plan) {
-      case 'free':
-        return 'gemini-2.5-flash-image'; // Calidad estándar
-      case 'starter':
-        return 'gemini-2.5-flash-image'; // Alta resolución
-      case 'pro':
-        return 'gemini-2.5-pro-image'; // Calidad Ultra 4K
-      default:
-        return 'gemini-2.5-flash-image';
-    }
-  } else {
-    // Modelos de texto según plan
-    switch (plan) {
-      case 'free':
-        return 'gemini-2.5-flash'; // Velocidad normal
-      case 'starter':
-        return 'gemini-2.5-flash'; // Sin marcas de agua
-      case 'pro':
-        return 'gemini-2.5-pro'; // Modelo superior
-      default:
-        return 'gemini-2.5-flash';
-    }
-  }
-};
-
-// --- GENERACIÓN DE COPY (TEXTO) ---
-const generateVariantCopy = async (
-  state: WizardState, 
-  settings: BusinessSettings, 
-  angleDescription: string,
-  plan: PlanTier
-): Promise<{ copy: string, hashtags: string[] }> => {
+// --- GENERAR COPY ---
+const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   const { platform, productData } = state;
-  const audience = productData.targetAudience || settings.targetAudience;
+  const audience = productData.targetAudience || settings.targetAudience || 'General';
 
   const prompt = `
-    Eres un experto en Marketing Digital.
-    Genera un caption (texto del post) para el producto: "${productData.name}".
-    Beneficio principal: "${productData.benefit}".
+    ROL: Copywriter experto.
+    TAREA: Escribir un caption para redes sociales.
+    PRODUCTO: "${productData.name}" (${productData.benefit}).
     
-    Contexto:
-    - Marca: ${settings.name} (${settings.industry})
+    DATOS:
     - Plataforma: ${platform}
-    - Audiencia objetivo: ${audience}
     - Tono: ${settings.tone}
-    - Ángulo creativo: ${angleDescription}
+    - Audiencia: ${audience}
+    - Estilo: ${angleDescription}
 
-    REGLAS OBLIGATORIAS:
-    1. Responde SOLAMENTE con un JSON válido.
-    2. Usa estructura AIDA (Atención, Interés, Deseo, Acción).
-    3. Incluye emojis relevantes.
-    4. Incluye 5 hashtags estratégicos.
-
-    FORMATO JSON:
-    { "copy": "Tu texto aquí...", "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"] }
+    SALIDA JSON OBLIGATORIA:
+    { "copy": "texto...", "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"] }
   `;
 
   try {
-    if (!apiKey) throw new Error("API Key no encontrada");
-
-    // Seleccionar modelo según el plan
-    const modelName = getModelByPlan(plan, false);
-    console.log(`📝 Usando modelo de texto: ${modelName} (Plan: ${plan})`);
+    if (!apiKey) throw new Error("Falta API Key");
 
     const response = await ai.models.generateContent({
-      model: modelName, 
+      model: 'gemini-2.5-flash', // Modelo rápido y obediente para JSON
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
-        safetySettings: SAFETY_SETTINGS,
+        safetySettings: TEXT_SAFETY_SETTINGS,
       }
     });
 
-    const cleanText = cleanJsonText(response.text);
-    const result = JSON.parse(cleanText);
-
+    const result = JSON.parse(cleanJsonText(response.text));
     return {
-      copy: result.copy || `${productData.name} 🔥\n\n${productData.benefit}\n\n¡Cómpralo ya!`,
-      hashtags: result.hashtags || ["#producto", "#oferta", "#nuevo", "#viral", "#tienda"]
+      copy: result.copy || `${productData.name} 🔥\n\n${productData.benefit}`,
+      hashtags: result.hashtags || ["#sellfy", "#promo"]
     };
   } catch (error) {
-    console.error("❌ Error Copy IA:", error);
+    console.error("❌ Error Copy:", error);
     return {
-      copy: `¡Atención! 🚨\n\nDescubre ${productData.name}, la mejor solución para ti.\n\n✅ ${productData.benefit}\n\n👇 ¡Haz clic en el enlace!`,
-      hashtags: ["#fyp", "#parati", "#new", "#promo", "#shop"]
+      copy: `¡Descubre ${productData.name}! ✨\n\n${productData.benefit}.`,
+      hashtags: ["#nuevo", "#trend"]
     };
   }
 };
 
-// --- GENERACIÓN DE IMAGEN ---
-const generateVariantImage = async (
-  state: WizardState, 
-  settings: BusinessSettings, 
-  angleDescription: string, 
-  plan: PlanTier
-): Promise<string | null> => {
+// --- GENERAR IMAGEN ---
+const generateVariantImage = async (state: WizardState, settings: BusinessSettings, angleDescription: string, plan: PlanTier): Promise<string | null> => {
   const { contentType, platform, visualStyle, productData } = state;
   
   if (!platform) return null;
 
-  // Seleccionar modelo según el plan
-  const modelName = getModelByPlan(plan, true);
-  console.log(`🎨 Usando modelo de imagen: ${modelName} (Plan: ${plan})`);
+  // Selección de modelo
+  const isPro = plan === 'pro';
+  // Si es Pro usamos el modelo nuevo Preview, si es Free/Starter usamos el Flash Image (Nano Banana)
+  const modelName = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
   
-  // Configurar calidad según plan
-  let qualitySettings = '';
-  switch (plan) {
-    case 'free':
-      qualitySettings = 'Standard quality, with watermark.';
-      break;
-    case 'starter':
-      qualitySettings = 'High resolution, no watermark.';
-      break;
-    case 'pro':
-      qualitySettings = 'Ultra high resolution 4K, premium quality, no watermark.';
-      break;
-  }
-  
-  // Prompt diseñado para forzar la salida de imagen
+  console.log(`🎨 Iniciando Imagen con modelo: ${modelName} (Plan: ${plan})`);
+
   let promptText = `
-    Generate a photorealistic product image of "${productData.name}".
-    Key Benefit/Feature to visualize: ${productData.benefit}.
-    
-    Style Guidelines:
-    - Type: ${contentType}
-    - Aesthetic: ${visualStyle}
-    - Composition: ${angleDescription}
-    - Brand Colors: ${settings.primaryColor} and ${settings.secondaryColor}
-    - Lighting: Professional studio lighting, high resolution, sharp focus.
-    - Quality: ${qualitySettings}
-    
-    IMPORTANT: The image must be high quality and suitable for social media advertising.
+    Professional product photography of "${productData.name}".
+    Main Feature: ${productData.benefit}.
+    Style: ${visualStyle}, ${contentType}.
+    Composition: ${angleDescription}.
+    Colors: ${settings.primaryColor} and ${settings.secondaryColor}.
+    Lighting: Professional studio lighting, photorealistic, 8k.
   `;
   
+  // Aspect Ratio en el texto del prompt (funciona mejor para modelos Flash)
   if (platform.includes('Stories') || platform.includes('Catalog')) {
-     promptText += " Aspect Ratio: Vertical (9:16). Center the subject.";
+     promptText += " FORMAT: Vertical (9:16 aspect ratio).";
   } else {
-     promptText += " Aspect Ratio: Square (1:1).";
+     promptText += " FORMAT: Square (1:1 aspect ratio).";
   }
 
   try {
-    if (!apiKey) throw new Error("API Key no detectada");
+    if (!apiKey) throw new Error("Falta API Key");
 
     const parts: any[] = [];
 
-    // 1. Imagen base si existe
+    // Imagen base (img2img)
     if (productData.baseImage) {
       const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         parts.push({
-          inlineData: {
-            mimeType: matches[1],
-            data: matches[2]
-          }
+          inlineData: { mimeType: matches[1], data: matches[2] }
         });
-        promptText = `Use the attached image as a strict reference for the product. ${promptText}`;
+        promptText = `Use the attached image as STRICT reference. ${promptText}`;
       }
     }
 
-    // 2. Texto del prompt
     parts.push({ text: promptText });
+
+    // Configuración:
+    // gemini-2.5-flash-image NO acepta 'imageConfig' ni 'safetySettings' complejos.
+    // gemini-3-pro-image-preview SÍ acepta 'imageConfig'.
+    let requestConfig = {};
+    
+    if (isPro) {
+        requestConfig = {
+            imageConfig: { imageSize: '1K' } // Solo para Pro
+        };
+    }
 
     const response = await ai.models.generateContent({
       model: modelName,
       contents: { parts },
-      config: {
-        safetySettings: SAFETY_SETTINGS, // CRUCIAL: Desactivar filtros
-      }
+      // @ts-ignore
+      config: requestConfig
     });
 
-    // 3. Buscar la imagen en todas las partes de la respuesta
+    // Búsqueda profunda de la imagen
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
       
-      // Verificar si fue bloqueado
+      // Chequeo de seguridad explícito
       if (candidate.finishReason === 'SAFETY') {
-        console.error("⚠️ Imagen bloqueada por filtros de seguridad de Google.");
+        console.warn("⚠️ Imagen bloqueada por SAFETY filters.");
         return null;
       }
 
       if (candidate.content && candidate.content.parts) {
         for (const part of candidate.content.parts) {
           if (part.inlineData && part.inlineData.data) {
+            console.log("✅ Imagen generada exitosamente.");
             return `data:image/png;base64,${part.inlineData.data}`;
           }
         }
       }
     }
     
-    console.warn("⚠️ La IA respondió pero no devolvió datos de imagen (posiblemente devolvió texto).");
-  } catch (error) {
-    console.error(`❌ Error Imagen IA (${modelName}):`, error);
+    console.warn("⚠️ La API respondió OK pero sin datos de imagen.", response);
+
+  } catch (error: any) {
+    // Log detallado para que veas en la consola (F12) qué pasó
+    console.error(`❌ ERROR CRÍTICO IMAGEN (${modelName}):`, error);
+    if (error.message?.includes('400')) {
+        console.error("💡 PISTA: El error 400 suele ser por configuración inválida para el modelo seleccionado.");
+    }
   }
   
   return null;
 };
 
-// --- ORQUESTADOR PRINCIPAL ---
-export const generateCampaign = async (
-  state: WizardState, 
-  settings: BusinessSettings, 
-  plan: PlanTier
-): Promise<CampaignResult> => {
+// --- ORQUESTADOR ---
+export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const angles = [
-    "Product Hero: Centered, clean background, focus on details",
-    "Lifestyle: In use, natural environment, human element",
-    "Creative/Artistic: Dramatic lighting, abstract background elements",
-    "Minimalist: Solid color background matching brand identity"
+    "Hero Shot: Clean background, centered product",
+    "Lifestyle: Product in context/use",
+    "Creative: Artistic lighting and shadows",
+    "Detail: Close-up on key features"
   ];
 
-  console.log(`🚀 Iniciando campaña (Plan: ${plan}) con Safety Settings OFF...`);
+  console.log(`🚀 START CAMPAIGN - ${new Date().toLocaleTimeString()}`);
 
-  // Paralelismo seguro
   const promises = angles.map(async (angle, index) => {
     try {
       const [img, txt] = await Promise.all([
         generateVariantImage(state, settings, angle, plan),
-        generateVariantCopy(state, settings, angle, plan)
+        generateVariantCopy(state, settings, angle)
       ]);
 
       return {
         id: `var-${Date.now()}-${index}`,
-        // Placeholder SOLO si falla la imagen real
-        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Error')}`,
+        // Si falla la imagen, usamos un placeholder que lo indique visualmente
+        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Error Gen')}`,
         copy: txt.copy,
         hashtags: txt.hashtags,
         angle: angle
       } as ContentVariant;
 
     } catch (e) {
-      console.error(`Error variante ${index}:`, e);
       return null;
     }
   });
@@ -284,13 +219,12 @@ export const generateCampaign = async (
   const results = await Promise.all(promises);
   const validVariants = results.filter((v): v is ContentVariant => v !== null);
 
-  // Fallback de emergencia
   if (validVariants.length === 0) {
       validVariants.push({
-          id: 'fatal-error',
+          id: 'fatal',
           image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+Total`,
-          copy: "No pudimos conectar con los servicios de IA. Por favor verifica tu API Key.",
-          hashtags: ["#error", "#ayuda"],
+          copy: "Error de conexión. Revisa la consola (F12) para más detalles.",
+          hashtags: ["#error"],
           angle: "System Error"
       });
   }
