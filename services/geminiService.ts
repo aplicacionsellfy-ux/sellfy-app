@@ -1,31 +1,38 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
-// --- CONFIGURACIÓN API KEY ---
-const getApiKey = () => {
-  let key = '';
+// --- INICIALIZACIÓN ROBUSTA DEL CLIENTE ---
+const getClient = () => {
+  // 1. Intentar leer la variable estándar de Vite (La más segura en frontend)
   // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    // @ts-ignore
-    if (import.meta.env.VITE_API_KEY) key = import.meta.env.VITE_API_KEY;
-    // @ts-ignore
-    else if (import.meta.env.API_KEY) key = import.meta.env.API_KEY;
-  }
+  let key = import.meta.env.VITE_API_KEY;
+
+  // 2. Si no existe, intentar leer process.env (Polyfill)
   if (!key) {
     try {
       // @ts-ignore
-      if (typeof process !== 'undefined' && process.env?.API_KEY) {
-        // @ts-ignore
-        key = process.env.API_KEY;
-      }
+      key = process.env.API_KEY;
     } catch (e) {}
   }
-  return key;
+
+  // 3. Si aún no existe, buscar claves alternativas comunes
+  if (!key) {
+    try {
+      // @ts-ignore
+      key = import.meta.env.API_KEY;
+    } catch (e) {}
+  }
+
+  if (!key) {
+    console.error("⛔ FATAL: No se encontró ninguna API Key válida en el entorno.");
+    return null;
+  }
+
+  // Inicializar cliente
+  return new GoogleGenAI({ apiKey: key });
 };
 
-const apiKey = getApiKey();
-// @ts-ignore
-const ai = new GoogleGenAI({ apiKey: apiKey || 'no-key-found' });
+const ai = getClient();
 
 // --- SEGURIDAD TEXTO ---
 const TEXT_SAFETY_SETTINGS = [
@@ -61,10 +68,10 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
   `;
 
   try {
-    if (!apiKey) throw new Error("Falta API Key");
+    if (!ai) throw new Error("Cliente IA no inicializado (Falta Key)");
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // Modelo rápido y obediente para JSON
+      model: 'gemini-2.5-flash', 
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -94,53 +101,47 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
 
   // Selección de modelo
   const isPro = plan === 'pro';
-  // Si es Pro usamos el modelo nuevo Preview, si es Free/Starter usamos el Flash Image (Nano Banana)
   const modelName = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
   
-  console.log(`🎨 Iniciando Imagen con modelo: ${modelName} (Plan: ${plan})`);
+  console.log(`🎨 Generando imagen con: ${modelName}`);
 
   let promptText = `
     Professional product photography of "${productData.name}".
-    Main Feature: ${productData.benefit}.
+    Feature: ${productData.benefit}.
     Style: ${visualStyle}, ${contentType}.
     Composition: ${angleDescription}.
-    Colors: ${settings.primaryColor} and ${settings.secondaryColor}.
-    Lighting: Professional studio lighting, photorealistic, 8k.
+    Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
+    Lighting: Professional studio lighting, photorealistic.
   `;
   
-  // Aspect Ratio en el texto del prompt (funciona mejor para modelos Flash)
   if (platform.includes('Stories') || platform.includes('Catalog')) {
-     promptText += " FORMAT: Vertical (9:16 aspect ratio).";
+     promptText += " Vertical 9:16 aspect ratio.";
   } else {
-     promptText += " FORMAT: Square (1:1 aspect ratio).";
+     promptText += " Square 1:1 aspect ratio.";
   }
 
   try {
-    if (!apiKey) throw new Error("Falta API Key");
+    if (!ai) throw new Error("Cliente IA no inicializado (Falta Key)");
 
     const parts: any[] = [];
 
-    // Imagen base (img2img)
     if (productData.baseImage) {
       const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         parts.push({
           inlineData: { mimeType: matches[1], data: matches[2] }
         });
-        promptText = `Use the attached image as STRICT reference. ${promptText}`;
+        promptText = `Use reference image. ${promptText}`;
       }
     }
 
     parts.push({ text: promptText });
 
-    // Configuración:
-    // gemini-2.5-flash-image NO acepta 'imageConfig' ni 'safetySettings' complejos.
-    // gemini-3-pro-image-preview SÍ acepta 'imageConfig'.
+    // Configuración específica para evitar error 400 en flash-image
     let requestConfig = {};
-    
     if (isPro) {
         requestConfig = {
-            imageConfig: { imageSize: '1K' } // Solo para Pro
+            imageConfig: { imageSize: '1K' }
         };
     }
 
@@ -151,34 +152,21 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
       config: requestConfig
     });
 
-    // Búsqueda profunda de la imagen
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
-      
-      // Chequeo de seguridad explícito
-      if (candidate.finishReason === 'SAFETY') {
-        console.warn("⚠️ Imagen bloqueada por SAFETY filters.");
-        return null;
-      }
-
       if (candidate.content && candidate.content.parts) {
         for (const part of candidate.content.parts) {
           if (part.inlineData && part.inlineData.data) {
-            console.log("✅ Imagen generada exitosamente.");
             return `data:image/png;base64,${part.inlineData.data}`;
           }
         }
       }
     }
     
-    console.warn("⚠️ La API respondió OK pero sin datos de imagen.", response);
+    console.warn("⚠️ IA respondió sin imagen.");
 
   } catch (error: any) {
-    // Log detallado para que veas en la consola (F12) qué pasó
-    console.error(`❌ ERROR CRÍTICO IMAGEN (${modelName}):`, error);
-    if (error.message?.includes('400')) {
-        console.error("💡 PISTA: El error 400 suele ser por configuración inválida para el modelo seleccionado.");
-    }
+    console.error(`❌ Error Generación Imagen (${modelName}):`, error);
   }
   
   return null;
@@ -187,13 +175,13 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
 // --- ORQUESTADOR ---
 export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const angles = [
-    "Hero Shot: Clean background, centered product",
-    "Lifestyle: Product in context/use",
-    "Creative: Artistic lighting and shadows",
-    "Detail: Close-up on key features"
+    "Studio Hero Shot",
+    "Lifestyle Context",
+    "Creative Lighting",
+    "Detail Macro"
   ];
 
-  console.log(`🚀 START CAMPAIGN - ${new Date().toLocaleTimeString()}`);
+  console.log(`🚀 Iniciando Campaña...`);
 
   const promises = angles.map(async (angle, index) => {
     try {
@@ -204,8 +192,7 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
 
       return {
         id: `var-${Date.now()}-${index}`,
-        // Si falla la imagen, usamos un placeholder que lo indique visualmente
-        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Error Gen')}`,
+        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Error')}`,
         copy: txt.copy,
         hashtags: txt.hashtags,
         angle: angle
@@ -222,8 +209,8 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
   if (validVariants.length === 0) {
       validVariants.push({
           id: 'fatal',
-          image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+Total`,
-          copy: "Error de conexión. Revisa la consola (F12) para más detalles.",
+          image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+API`,
+          copy: "Por favor verifica tu API Key en el archivo .env",
           hashtags: ["#error"],
           angle: "System Error"
       });
