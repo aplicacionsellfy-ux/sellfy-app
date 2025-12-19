@@ -45,7 +45,8 @@ const cleanJsonText = (text: string | undefined): string => {
 // --- GENERACIÓN DE COPY (TEXTO) ---
 const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   const { platform, productData } = state;
-  const audience = productData.targetAudience || settings.targetAudience;
+  // Solución TS6133: Usamos la variable audience en el prompt
+  const audience = productData.targetAudience || settings.targetAudience || 'General';
 
   const prompt = `
     Eres un experto en Marketing Digital.
@@ -56,6 +57,7 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
     - Marca: ${settings.name} (${settings.industry})
     - Plataforma: ${platform}
     - Tono: ${settings.tone}
+    - Audiencia Objetivo: ${audience}
     - Ángulo creativo: ${angleDescription}
 
     REGLAS OBLIGATORIAS:
@@ -105,6 +107,11 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
 
   // Modelo: Usamos 'gemini-2.5-flash-image' (Nano Banana Image).
   const modelName = 'gemini-2.5-flash-image';
+
+  // Solución TS6133: Usamos la variable plan para ajustar palabras clave del prompt
+  const qualityKeywords = plan === 'pro' 
+    ? 'High definition, 4k, hyper-realistic, commercial advertisement standard' 
+    : 'Social media quality, sharp focus, good lighting';
   
   // Prompt diseñado para forzar la salida de imagen
   let promptText = `
@@ -116,7 +123,7 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
     - Aesthetic: ${visualStyle}
     - Composition: ${angleDescription}
     - Brand Colors: ${settings.primaryColor} and ${settings.secondaryColor}
-    - Lighting: Professional studio lighting, high resolution, sharp focus.
+    - Quality: ${qualityKeywords}
     
     IMPORTANT: The image must be high quality and suitable for social media advertising.
   `;
