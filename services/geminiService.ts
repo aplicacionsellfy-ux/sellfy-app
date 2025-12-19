@@ -42,11 +42,44 @@ const cleanJsonText = (text: string | undefined): string => {
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
 };
 
+// --- FUNCIÓN PARA SELECCIONAR MODELO SEGÚN PLAN ---
+const getModelByPlan = (plan: PlanTier, isImage: boolean = false): string => {
+  if (isImage) {
+    // Modelos de imagen según plan
+    switch (plan) {
+      case 'free':
+        return 'gemini-2.5-flash-image'; // Calidad estándar
+      case 'starter':
+        return 'gemini-2.5-flash-image'; // Alta resolución
+      case 'pro':
+        return 'gemini-2.5-pro-image'; // Calidad Ultra 4K
+      default:
+        return 'gemini-2.5-flash-image';
+    }
+  } else {
+    // Modelos de texto según plan
+    switch (plan) {
+      case 'free':
+        return 'gemini-2.5-flash'; // Velocidad normal
+      case 'starter':
+        return 'gemini-2.5-flash'; // Sin marcas de agua
+      case 'pro':
+        return 'gemini-2.5-pro'; // Modelo superior
+      default:
+        return 'gemini-2.5-flash';
+    }
+  }
+};
+
 // --- GENERACIÓN DE COPY (TEXTO) ---
-const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
+const generateVariantCopy = async (
+  state: WizardState, 
+  settings: BusinessSettings, 
+  angleDescription: string,
+  plan: PlanTier
+): Promise<{ copy: string, hashtags: string[] }> => {
   const { platform, productData } = state;
-  // Solución TS6133: Usamos la variable audience en el prompt
-  const audience = productData.targetAudience || settings.targetAudience || 'General';
+  const audience = productData.targetAudience || settings.targetAudience;
 
   const prompt = `
     Eres un experto en Marketing Digital.
@@ -56,8 +89,8 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
     Contexto:
     - Marca: ${settings.name} (${settings.industry})
     - Plataforma: ${platform}
+    - Audiencia objetivo: ${audience}
     - Tono: ${settings.tone}
-    - Audiencia Objetivo: ${audience}
     - Ángulo creativo: ${angleDescription}
 
     REGLAS OBLIGATORIAS:
@@ -73,9 +106,12 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
   try {
     if (!apiKey) throw new Error("API Key no encontrada");
 
-    // Usamos 'gemini-2.5-flash' (Nano Banana) estándar para máxima velocidad y obediencia JSON
+    // Seleccionar modelo según el plan
+    const modelName = getModelByPlan(plan, false);
+    console.log(`📝 Usando modelo de texto: ${modelName} (Plan: ${plan})`);
+
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', 
+      model: modelName, 
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -100,18 +136,33 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
 };
 
 // --- GENERACIÓN DE IMAGEN ---
-const generateVariantImage = async (state: WizardState, settings: BusinessSettings, angleDescription: string, plan: PlanTier): Promise<string | null> => {
+const generateVariantImage = async (
+  state: WizardState, 
+  settings: BusinessSettings, 
+  angleDescription: string, 
+  plan: PlanTier
+): Promise<string | null> => {
   const { contentType, platform, visualStyle, productData } = state;
   
   if (!platform) return null;
 
-  // Modelo: Usamos 'gemini-2.5-flash-image' (Nano Banana Image).
-  const modelName = 'gemini-2.5-flash-image';
-
-  // Solución TS6133: Usamos la variable plan para ajustar palabras clave del prompt
-  const qualityKeywords = plan === 'pro' 
-    ? 'High definition, 4k, hyper-realistic, commercial advertisement standard' 
-    : 'Social media quality, sharp focus, good lighting';
+  // Seleccionar modelo según el plan
+  const modelName = getModelByPlan(plan, true);
+  console.log(`🎨 Usando modelo de imagen: ${modelName} (Plan: ${plan})`);
+  
+  // Configurar calidad según plan
+  let qualitySettings = '';
+  switch (plan) {
+    case 'free':
+      qualitySettings = 'Standard quality, with watermark.';
+      break;
+    case 'starter':
+      qualitySettings = 'High resolution, no watermark.';
+      break;
+    case 'pro':
+      qualitySettings = 'Ultra high resolution 4K, premium quality, no watermark.';
+      break;
+  }
   
   // Prompt diseñado para forzar la salida de imagen
   let promptText = `
@@ -123,7 +174,8 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
     - Aesthetic: ${visualStyle}
     - Composition: ${angleDescription}
     - Brand Colors: ${settings.primaryColor} and ${settings.secondaryColor}
-    - Quality: ${qualityKeywords}
+    - Lighting: Professional studio lighting, high resolution, sharp focus.
+    - Quality: ${qualitySettings}
     
     IMPORTANT: The image must be high quality and suitable for social media advertising.
   `;
@@ -161,7 +213,6 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
       contents: { parts },
       config: {
         safetySettings: SAFETY_SETTINGS, // CRUCIAL: Desactivar filtros
-        // imageConfig NO es soportado por Nano Banana (2.5 flash image), no lo incluimos.
       }
     });
 
@@ -193,7 +244,11 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
 };
 
 // --- ORQUESTADOR PRINCIPAL ---
-export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
+export const generateCampaign = async (
+  state: WizardState, 
+  settings: BusinessSettings, 
+  plan: PlanTier
+): Promise<CampaignResult> => {
   const angles = [
     "Product Hero: Centered, clean background, focus on details",
     "Lifestyle: In use, natural environment, human element",
@@ -201,14 +256,14 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
     "Minimalist: Solid color background matching brand identity"
   ];
 
-  console.log("🚀 Iniciando campaña con Safety Settings OFF...");
+  console.log(`🚀 Iniciando campaña (Plan: ${plan}) con Safety Settings OFF...`);
 
   // Paralelismo seguro
   const promises = angles.map(async (angle, index) => {
     try {
       const [img, txt] = await Promise.all([
         generateVariantImage(state, settings, angle, plan),
-        generateVariantCopy(state, settings, angle)
+        generateVariantCopy(state, settings, angle, plan)
       ]);
 
       return {
