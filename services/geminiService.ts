@@ -1,6 +1,9 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier } from "../types";
 
+// --- UTILIDADES ---
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // --- INICIALIZACIÓN ROBUSTA DEL CLIENTE ---
 const getClient = () => {
   // @ts-ignore
@@ -62,7 +65,7 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
   `;
 
   try {
-    if (!ai) throw new Error("Cliente IA no inicializado (Falta Key)");
+    if (!ai) throw new Error("Cliente IA no inicializado");
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash', 
@@ -79,7 +82,6 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
       hashtags: result.hashtags || ["#sellfy", "#promo"]
     };
   } catch (error) {
-    // console.error("❌ Error Copy:", error); // Silenciamos error de copy para no ensuciar consola
     return {
       copy: `¡Descubre ${productData.name}! ✨\n\n${productData.benefit}.`,
       hashtags: ["#nuevo", "#trend"]
@@ -87,7 +89,7 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
   }
 };
 
-// --- GENERAR IMAGEN (CON FALLBACK) ---
+// --- GENERAR IMAGEN ---
 const generateVariantImage = async (state: WizardState, settings: BusinessSettings, angleDescription: string, plan: PlanTier): Promise<string | null> => {
   const { contentType, platform, visualStyle, productData } = state;
   
@@ -121,16 +123,15 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
   }
   parts.push({ text: promptText });
 
-  // 2. Función auxiliar para intentar generar
+  // 2. Función auxiliar interna
   const tryGenerate = async (model: string): Promise<string | null> => {
     try {
       if (!ai) return null;
       
       const isProModel = model.includes('pro');
-      // Solo enviamos config especial para modelos Pro, los Flash a veces fallan con configs vacías
       const config = isProModel ? { imageConfig: { imageSize: '1K' } } : {};
 
-      console.log(`🎨 Intentando generar con: ${model}`);
+      console.log(`🎨 Generando (${model})...`);
       
       const response = await ai.models.generateContent({
         model: model,
@@ -151,29 +152,30 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
       }
       return null;
     } catch (error: any) {
-      if (error.message?.includes('429') || error.message?.includes('quota')) {
-         console.warn(`⚠️ Cuota excedida en ${model}.`);
-      } else {
-         console.warn(`⚠️ Error en ${model}:`, error.message);
-      }
-      throw error; // Relanzar para capturar en el fallback
+      // Lanzamos el error para que el orquestador sepa si fue un 429
+      throw error;
     }
   };
 
-  // 3. Estrategia de Ejecución
+  // 3. Estrategia de Selección de Modelo
   const primaryModel = plan === 'pro' ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
   const fallbackModel = 'gemini-2.5-flash-image';
 
   try {
     return await tryGenerate(primaryModel);
-  } catch (error) {
-    // Si falla el modelo Pro, intentamos el Flash automáticamente
+  } catch (error: any) {
+    // Si es un error de cuota (429), lo lanzamos arriba para activar el Circuit Breaker
+    if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error("QUOTA_EXCEEDED");
+    }
+
+    // Si es otro error y el modelo primario no era el fallback, intentamos fallback
     if (primaryModel !== fallbackModel) {
       try {
-        console.log("🔄 Activando fallback a modelo Flash...");
+        console.log("🔄 Fallback a Flash...");
         return await tryGenerate(fallbackModel);
-      } catch (fallbackError) {
-        console.error("❌ Falló también el modelo de respaldo.");
+      } catch (fallbackError: any) {
+        if (fallbackError.message?.includes('429')) throw new Error("QUOTA_EXCEEDED");
       }
     }
   }
@@ -181,7 +183,7 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
   return null;
 };
 
-// --- ORQUESTADOR (SECUENCIAL PARA EVITAR 429) ---
+// --- ORQUESTADOR INTELIGENTE (CIRCUIT BREAKER) ---
 export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const angles = [
     "Studio Hero Shot",
@@ -190,47 +192,58 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
     "Detail Macro"
   ];
 
-  console.log(`🚀 Iniciando Campaña (Modo Secuencial)...`);
+  console.log(`🚀 Iniciando Campaña...`);
 
   const variants: ContentVariant[] = [];
+  let circuitBreakerTripped = false; // Si esto es true, dejamos de pedir imágenes
 
-  // USAMOS FOR LOOP EN VEZ DE PROMISE.ALL PARA NO SATURAR LA API
   for (let i = 0; i < angles.length; i++) {
     const angle = angles[i];
     
-    // Pequeña pausa entre peticiones (rate limiting manual)
+    // Pausa dinámica: 5 segundos para la API gratuita
     if (i > 0) {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos de espera
+       await wait(5000); 
     }
 
-    try {
-      // Generamos Copy e Imagen en paralelo para esta variante específica
-      const [img, txt] = await Promise.all([
-        generateVariantImage(state, settings, angle, plan),
-        generateVariantCopy(state, settings, angle)
-      ]);
+    let imageResult: string | null = null;
+    let textResult = { copy: "Cargando...", hashtags: [] as string[] };
 
-      variants.push({
-        id: `var-${Date.now()}-${i}`,
-        // Placeholder elegante si falla la imagen
-        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Imagen')}`,
-        copy: txt.copy,
-        hashtags: txt.hashtags,
-        angle: angle
-      });
+    // 1. Intentamos generar COPY (Barato, rara vez falla)
+    textResult = await generateVariantCopy(state, settings, angle);
 
-    } catch (e) {
-      console.error(`Error procesando variante ${i}`, e);
+    // 2. Intentamos generar IMAGEN (Solo si no ha saltado el disyuntor)
+    if (!circuitBreakerTripped) {
+      try {
+        imageResult = await generateVariantImage(state, settings, angle, plan);
+      } catch (error: any) {
+        if (error.message === "QUOTA_EXCEEDED") {
+          console.warn("⚠️ Límite de cuota alcanzado. Deteniendo generación de imágenes restantes.");
+          circuitBreakerTripped = true; // ACTIVAR CIRCUIT BREAKER
+        } else {
+          console.error(`Error imagen var ${i}:`, error);
+        }
+      }
+    } else {
+        console.log(`⏩ Saltando imagen ${i} por límite de cuota.`);
     }
+
+    variants.push({
+      id: `var-${Date.now()}-${i}`,
+      // Si hay imagen, la usa. Si no, usa el placeholder bonito.
+      image: imageResult || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name)}`,
+      copy: textResult.copy,
+      hashtags: textResult.hashtags,
+      angle: angle
+    });
   }
 
-  // Si todo falló, devolvemos un error controlado
+  // Si no se generó ninguna variante (caso extremo), añadimos una de error
   if (variants.length === 0) {
       variants.push({
           id: 'fatal',
-          image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+Servidor`,
-          copy: "El servicio de IA está saturado en este momento. Por favor intenta en unos segundos.",
-          hashtags: ["#error", "#tryagain"],
+          image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+Total`,
+          copy: "Hubo un problema de conexión. Intenta de nuevo más tarde.",
+          hashtags: ["#error"],
           angle: "System Error"
       });
   }
