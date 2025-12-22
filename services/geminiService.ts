@@ -3,19 +3,14 @@ import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier
 
 // --- INICIALIZACIÓN ROBUSTA DEL CLIENTE ---
 const getClient = () => {
-  // 1. Intentar leer la variable estándar de Vite (La más segura en frontend)
   // @ts-ignore
   let key = import.meta.env.VITE_API_KEY;
-
-  // 2. Si no existe, intentar leer process.env (Polyfill)
   if (!key) {
     try {
       // @ts-ignore
       key = process.env.API_KEY;
     } catch (e) {}
   }
-
-  // 3. Si aún no existe, buscar claves alternativas comunes
   if (!key) {
     try {
       // @ts-ignore
@@ -28,7 +23,6 @@ const getClient = () => {
     return null;
   }
 
-  // Inicializar cliente
   return new GoogleGenAI({ apiKey: key });
 };
 
@@ -85,7 +79,7 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
       hashtags: result.hashtags || ["#sellfy", "#promo"]
     };
   } catch (error) {
-    console.error("❌ Error Copy:", error);
+    // console.error("❌ Error Copy:", error); // Silenciamos error de copy para no ensuciar consola
     return {
       copy: `¡Descubre ${productData.name}! ✨\n\n${productData.benefit}.`,
       hashtags: ["#nuevo", "#trend"]
@@ -93,18 +87,13 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
   }
 };
 
-// --- GENERAR IMAGEN ---
+// --- GENERAR IMAGEN (CON FALLBACK) ---
 const generateVariantImage = async (state: WizardState, settings: BusinessSettings, angleDescription: string, plan: PlanTier): Promise<string | null> => {
   const { contentType, platform, visualStyle, productData } = state;
   
   if (!platform) return null;
 
-  // Selección de modelo
-  const isPro = plan === 'pro';
-  const modelName = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-  
-  console.log(`🎨 Generando imagen con: ${modelName}`);
-
+  // 1. Definición del Prompt
   let promptText = `
     Professional product photography of "${productData.name}".
     Feature: ${productData.benefit}.
@@ -120,59 +109,79 @@ const generateVariantImage = async (state: WizardState, settings: BusinessSettin
      promptText += " Square 1:1 aspect ratio.";
   }
 
-  try {
-    if (!ai) throw new Error("Cliente IA no inicializado (Falta Key)");
-
-    const parts: any[] = [];
-
-    if (productData.baseImage) {
-      const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        parts.push({
-          inlineData: { mimeType: matches[1], data: matches[2] }
-        });
-        promptText = `Use reference image. ${promptText}`;
-      }
+  const parts: any[] = [];
+  if (productData.baseImage) {
+    const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+      parts.push({
+        inlineData: { mimeType: matches[1], data: matches[2] }
+      });
+      promptText = `Use reference image. ${promptText}`;
     }
+  }
+  parts.push({ text: promptText });
 
-    parts.push({ text: promptText });
+  // 2. Función auxiliar para intentar generar
+  const tryGenerate = async (model: string): Promise<string | null> => {
+    try {
+      if (!ai) return null;
+      
+      const isProModel = model.includes('pro');
+      // Solo enviamos config especial para modelos Pro, los Flash a veces fallan con configs vacías
+      const config = isProModel ? { imageConfig: { imageSize: '1K' } } : {};
 
-    // Configuración específica para evitar error 400 en flash-image
-    let requestConfig = {};
-    if (isPro) {
-        requestConfig = {
-            imageConfig: { imageSize: '1K' }
-        };
-    }
+      console.log(`🎨 Intentando generar con: ${model}`);
+      
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: { parts },
+        // @ts-ignore
+        config: config
+      });
 
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: { parts },
-      // @ts-ignore
-      config: requestConfig
-    });
-
-    if (response.candidates && response.candidates.length > 0) {
-      const candidate = response.candidates[0];
-      if (candidate.content && candidate.content.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData && part.inlineData.data) {
-            return `data:image/png;base64,${part.inlineData.data}`;
+      if (response.candidates && response.candidates.length > 0) {
+        const candidate = response.candidates[0];
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              return `data:image/png;base64,${part.inlineData.data}`;
+            }
           }
         }
       }
+      return null;
+    } catch (error: any) {
+      if (error.message?.includes('429') || error.message?.includes('quota')) {
+         console.warn(`⚠️ Cuota excedida en ${model}.`);
+      } else {
+         console.warn(`⚠️ Error en ${model}:`, error.message);
+      }
+      throw error; // Relanzar para capturar en el fallback
     }
-    
-    console.warn("⚠️ IA respondió sin imagen.");
+  };
 
-  } catch (error: any) {
-    console.error(`❌ Error Generación Imagen (${modelName}):`, error);
+  // 3. Estrategia de Ejecución
+  const primaryModel = plan === 'pro' ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
+  const fallbackModel = 'gemini-2.5-flash-image';
+
+  try {
+    return await tryGenerate(primaryModel);
+  } catch (error) {
+    // Si falla el modelo Pro, intentamos el Flash automáticamente
+    if (primaryModel !== fallbackModel) {
+      try {
+        console.log("🔄 Activando fallback a modelo Flash...");
+        return await tryGenerate(fallbackModel);
+      } catch (fallbackError) {
+        console.error("❌ Falló también el modelo de respaldo.");
+      }
+    }
   }
   
   return null;
 };
 
-// --- ORQUESTADOR ---
+// --- ORQUESTADOR (SECUENCIAL PARA EVITAR 429) ---
 export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const angles = [
     "Studio Hero Shot",
@@ -181,37 +190,47 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
     "Detail Macro"
   ];
 
-  console.log(`🚀 Iniciando Campaña...`);
+  console.log(`🚀 Iniciando Campaña (Modo Secuencial)...`);
 
-  const promises = angles.map(async (angle, index) => {
+  const variants: ContentVariant[] = [];
+
+  // USAMOS FOR LOOP EN VEZ DE PROMISE.ALL PARA NO SATURAR LA API
+  for (let i = 0; i < angles.length; i++) {
+    const angle = angles[i];
+    
+    // Pequeña pausa entre peticiones (rate limiting manual)
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 segundos de espera
+    }
+
     try {
+      // Generamos Copy e Imagen en paralelo para esta variante específica
       const [img, txt] = await Promise.all([
         generateVariantImage(state, settings, angle, plan),
         generateVariantCopy(state, settings, angle)
       ]);
 
-      return {
-        id: `var-${Date.now()}-${index}`,
-        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Error')}`,
+      variants.push({
+        id: `var-${Date.now()}-${i}`,
+        // Placeholder elegante si falla la imagen
+        image: img || `https://placehold.co/1080x1350/1e293b/6366f1?text=${encodeURIComponent(state.productData.name || 'Imagen')}`,
         copy: txt.copy,
         hashtags: txt.hashtags,
         angle: angle
-      } as ContentVariant;
+      });
 
     } catch (e) {
-      return null;
+      console.error(`Error procesando variante ${i}`, e);
     }
-  });
+  }
 
-  const results = await Promise.all(promises);
-  const validVariants = results.filter((v): v is ContentVariant => v !== null);
-
-  if (validVariants.length === 0) {
-      validVariants.push({
+  // Si todo falló, devolvemos un error controlado
+  if (variants.length === 0) {
+      variants.push({
           id: 'fatal',
-          image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+API`,
-          copy: "Por favor verifica tu API Key en el archivo .env",
-          hashtags: ["#error"],
+          image: `https://placehold.co/1080x1350/ef4444/ffffff?text=Error+Servidor`,
+          copy: "El servicio de IA está saturado en este momento. Por favor intenta en unos segundos.",
+          hashtags: ["#error", "#tryagain"],
           angle: "System Error"
       });
   }
@@ -220,6 +239,6 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
     id: `camp-${Date.now()}`,
     timestamp: Date.now(),
     platform: state.platform!,
-    variants: validVariants
+    variants: variants
   };
 };
