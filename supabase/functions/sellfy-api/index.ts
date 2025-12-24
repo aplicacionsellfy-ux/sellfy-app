@@ -80,30 +80,34 @@ Deno.serve(async (req: Request) => {
         });
     }
 
-    // C. Generar Imagen Visual - Gemini 3 Pro Image (Mayor fidelidad)
+    // C. Generar Imagen Visual - Gemini 3 Pro (Fidelidad Estricta)
     if (action === 'generate_visual') {
         const { angle, state, settings } = payload;
         const { productData, visualStyle } = state;
 
         const parts = [];
 
-        // Prompt reforzado para fidelidad
+        // Prompt optimizado para evitar "alucinaciones" (inventar otro producto)
+        // Usamos palabras clave como "Composite", "Insert", "Keep unchanged"
         let promptText = `
-          TASK: Create a professional product photograph compositing the PRODUCT provided in the image into a new background.
+          TASK: You are a professional product photographer.
+          ACTION: Insert the PRODUCT shown in the reference image into a new background.
           
-          STRICT VISUAL RULES:
-          1. **DO NOT ALTER THE PRODUCT**: The object in the input image MUST remain exactly the same (same logo, label, shape, color). Do not hallucinate a new bottle or packaging.
-          2. **BACKGROUND**: Place the product in a ${visualStyle} environment.
+          STRICT CONSTRAINTS (CRITICAL):
+          1. **IDENTITY LOCK**: The object in the input image is the "Hero". You MUST preserve its exact shape, logo, text, label, and colors. Do NOT redraw the bottle/package. Do NOT invent a new design.
+          2. **SCENE**: Create a realistic, high-quality background environment: ${visualStyle}.
           3. **COMPOSITION**: ${angle}.
-          4. **BRANDING**: Subtly integrate the brand color ${settings.primaryColor} into the lighting or props.
+          4. **LIGHTING**: Cinematic studio lighting that matches the product's perspective.
+          5. **BRANDING**: Subtle hints of ${settings.primaryColor} in the environment (light or props), NOT on the product itself.
           
-          OUTPUT: High resolution, photorealistic, 4k.
+          OUTPUT: 4k Photorealistic Image.
         `;
         
         if (!state.productData.baseImage) {
-           promptText += `\n(NOTE: No reference image provided. Create a generic product matching name: ${productData.name})`;
+           promptText = `Create a high-quality product photography for a product named "${productData.name}". Style: ${visualStyle}. Angle: ${angle}. Brand colors: ${settings.primaryColor}.`;
         }
 
+        // Importante: Enviar el texto primero, luego la imagen para contexto
         parts.push({ text: promptText });
 
         if (state.productData.baseImage) {
@@ -119,7 +123,7 @@ Deno.serve(async (req: Request) => {
         }
 
         try {
-            // Usamos Gemini 3 Pro Image Preview para mejor obediencia al prompt de "no cambiar el producto"
+            // Usamos Gemini 3 Pro Image Preview. Es el modelo más capaz para seguir instrucciones complejas.
             const response = await ai.models.generateContent({
                 model: 'gemini-3-pro-image-preview', 
                 contents: { parts: parts },
@@ -168,7 +172,7 @@ Deno.serve(async (req: Request) => {
         try {
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic product motion, professional commercial lighting, slow motion 60fps.",
+                prompt: "Cinematic product motion, professional commercial lighting, slow motion 60fps, 4k resolution, highly detailed.",
                 image: { 
                     imageBytes: matches[2], 
                     mimeType: matches[1] 
@@ -194,19 +198,26 @@ Deno.serve(async (req: Request) => {
         const { operationName } = payload;
         
         try {
-            // CORRECCIÓN: La SDK espera la propiedad 'operation' con un objeto que tenga 'name'.
-            // Esto corrige el error 500 "invalid argument" o crash interno.
-            const operation = await ai.operations.getVideosOperation({ 
-                operation: { name: operationName } 
-            });
+            // CORRECCIÓN CRÍTICA:
+            // Usamos 'ai.operations.getOperation' que es el método genérico y seguro.
+            // 'getVideosOperation' a veces falla dependiendo de la versión del SDK o espera argumentos anidados complejos.
+            const operation = await ai.operations.getOperation({ name: operationName });
             
             let videoUri = null;
             if (operation.done) {
+                 // La respuesta viene anidada en 'response'
                  // @ts-ignore
                  const rawUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-                 if (rawUri) {
-                     // Adjuntar API Key para descargar
-                     videoUri = `${rawUri}&key=${apiKey}`;
+                 
+                 // Fallback: A veces viene en result
+                 // @ts-ignore
+                 const resultUri = operation.result?.generatedVideos?.[0]?.video?.uri;
+
+                 const finalUri = rawUri || resultUri;
+
+                 if (finalUri) {
+                     // Adjuntar API Key para permitir la descarga segura
+                     videoUri = `${finalUri}&key=${apiKey}`;
                  }
             }
 
@@ -215,8 +226,8 @@ Deno.serve(async (req: Request) => {
             });
         } catch (e) {
             console.error("Polling error details:", e);
-            // Retornamos 200 con el error en JSON para que el frontend pueda manejarlo sin explotar
-            return new Response(JSON.stringify({ done: false, error: e.message }), {
+            // Retornamos 200 con el error en JSON para que el frontend pueda manejarlo sin mostrar un error 500
+            return new Response(JSON.stringify({ done: false, error: `Polling failed: ${e.message}` }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
