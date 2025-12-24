@@ -62,7 +62,7 @@ export interface ProductData {
   benefit: string;
   price?: string;
   promoDetails?: string;
-  targetAudience: string; // Specific to this campaign (optional override)
+  targetAudience: string; 
   baseImage?: string; // Base64 string
 }
 
@@ -80,7 +80,7 @@ export interface ContentVariant {
   isVideo: boolean; // Flag to identify video content
   copy: string;
   hashtags: string[];
-  angle: string; // Description of the angle/variant type
+  angle: string;
 }
 
 export interface CampaignResult {

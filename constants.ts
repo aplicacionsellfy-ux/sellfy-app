@@ -1,5 +1,6 @@
+
 import { ContentType, Platform, VisualStyle, PlanDetails } from './types';
-import { Camera, Zap, Tag, Rocket, Heart, Briefcase, Instagram, Facebook, MessageCircle, Layout, Star, Sun, Palette, Moon, ShoppingBag, Box, Video, PlayCircle } from 'lucide-react';
+import { Camera, Zap, Tag, Rocket, Briefcase, Instagram, Facebook, MessageCircle, Layout, Star, Sun, Palette, Moon, Box, Video, PlayCircle } from 'lucide-react';
 
 export const CREDIT_COSTS = {
   IMAGE: 1,

@@ -1,5 +1,6 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, Send, CreditCard, Lock, ShieldCheck, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, Send, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock } from 'lucide-react';
 import { ContentVariant, PlanDetails } from '../types';
 import { useToast } from './ui/Toast';
 import { animateImageWithVeo } from '../services/geminiService';
@@ -89,18 +90,43 @@ export const PaymentModal: React.FC<{
         <div className="p-6 bg-[#0B0F19]">
            {(step === 'method' || step === 'form') && (
                <div className="grid grid-cols-3 gap-3 mb-6">
-                  <button onClick={() => {setPaymentMethod('card'); setStep('form')}} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 flex flex-col items-center"><CreditCard size={20} /><span className="text-[10px] mt-1">Tarjeta</span></button>
-                  <button onClick={() => {setPaymentMethod('payphone'); setStep('form')}} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 flex flex-col items-center"><Smartphone size={20} /><span className="text-[10px] mt-1">PayPhone</span></button>
-                  <button onClick={() => {setPaymentMethod('paypal'); setStep('form')}} className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 flex flex-col items-center"><Globe size={20} /><span className="text-[10px] mt-1">PayPal</span></button>
+                  <button onClick={() => {setPaymentMethod('card'); setStep('form')}} className={`p-4 rounded-xl border flex flex-col items-center transition-all ${paymentMethod === 'card' ? 'bg-indigo-500/20 border-indigo-500 text-white' : 'bg-white/5 border-white/10 text-slate-400'}`}><CreditCard size={20} /><span className="text-[10px] mt-1">Tarjeta</span></button>
+                  <button onClick={() => {setPaymentMethod('payphone'); setStep('form')}} className={`p-4 rounded-xl border flex flex-col items-center transition-all ${paymentMethod === 'payphone' ? 'bg-orange-500/20 border-orange-500 text-white' : 'bg-white/5 border-white/10 text-slate-400'}`}><Smartphone size={20} /><span className="text-[10px] mt-1">PayPhone</span></button>
+                  <button onClick={() => {setPaymentMethod('paypal'); setStep('form')}} className={`p-4 rounded-xl border flex flex-col items-center transition-all ${paymentMethod === 'paypal' ? 'bg-blue-500/20 border-blue-500 text-white' : 'bg-white/5 border-white/10 text-slate-400'}`}><Globe size={20} /><span className="text-[10px] mt-1">PayPal</span></button>
                </div>
            )}
            {step === 'form' && (
               <div className="space-y-4">
-                 <input type="text" placeholder="Número de tarjeta (Simulado)" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white" />
-                 <button onClick={() => handleProcessPayment()} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl">Pagar Ahora</button>
+                 {paymentMethod === 'card' && (
+                    <>
+                        <input type="text" placeholder="Nombre del Titular" value={name} onChange={e => setName(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-indigo-500" />
+                        <input type="text" placeholder="Número de Tarjeta" value={cardNumber} onChange={e => setCardNumber(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-indigo-500" />
+                        <div className="flex gap-3">
+                             <input type="text" placeholder="MM/AA" value={expiry} onChange={e => setExpiry(e.target.value)} className="w-1/2 bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-indigo-500" />
+                             <div className="relative w-1/2">
+                                <input type="text" placeholder="CVC" value={cvc} onChange={e => setCvc(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-indigo-500" />
+                                <Lock size={14} className="absolute right-3 top-3.5 text-slate-500" />
+                             </div>
+                        </div>
+                    </>
+                 )}
+                 {paymentMethod === 'payphone' && (
+                    <>
+                        <input type="text" placeholder="Número de Celular" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-orange-500" />
+                        <input type="text" placeholder="Cédula de Identidad" value={idNumber} onChange={e => setIdNumber(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-orange-500" />
+                    </>
+                 )}
+                 {paymentMethod === 'paypal' && (
+                    <div className="text-center p-4 bg-blue-500/10 rounded-xl text-blue-200 text-sm">
+                        Serás redirigido a PayPal para completar el pago seguro.
+                    </div>
+                 )}
+                 <button onClick={() => handleProcessPayment()} disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors">
+                     {loading ? 'Procesando...' : `Pagar ${plan.price}`}
+                 </button>
               </div>
            )}
-           {step === 'processing' && <div className="text-center py-8"><Loader2 className="animate-spin mx-auto text-indigo-500" size={32} /><p className="text-white mt-4">Procesando...</p></div>}
+           {step === 'processing' && <div className="text-center py-8"><Loader2 className="animate-spin mx-auto text-indigo-500" size={32} /><p className="text-white mt-4">Procesando pago...</p></div>}
            {step === 'success' && <div className="text-center py-8"><CheckCircle className="mx-auto text-emerald-500" size={48} /><p className="text-white mt-4 font-bold">¡Pago Exitoso!</p></div>}
         </div>
       </div>
@@ -159,7 +185,6 @@ export const VariantCard: React.FC<{
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   
-  // Estado local para cuando transformamos una imagen en video
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
