@@ -3,15 +3,30 @@ import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier
 
 // --- CONFIGURATION ---
 const getGeminiKey = () => {
+  // 1. Try standard Vite env var (VITE_API_KEY) - Works in dev and prod if VITE_ prefix used
   // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env?.API_KEY) return process.env.API_KEY;
+  if (import.meta.env?.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
+  
+  // 2. Try direct replacement from vite.config.ts (process.env.API_KEY) - Works for specific Vercel/Cloud configs
+  try {
+    // @ts-ignore
+    // Vite replaces 'process.env.API_KEY' with the literal string value at build time.
+    // We access it inside try/catch to handle cases where it's NOT replaced and process is undefined (browser).
+    const key = process.env.API_KEY;
+    if (key) return key;
+  } catch (e) {
+    // ReferenceError: process is not defined
+  }
+  
   return "";
 };
 
 const GEMINI_API_KEY = getGeminiKey();
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
+
+if (!GEMINI_API_KEY) {
+    console.warn("⚠️ Gemini Service: No API Key found. AI features will fail.");
+}
 
 // Helper to sanitize JSON response
 const cleanJsonText = (text: string | undefined): string => {
@@ -73,7 +88,6 @@ const generateWithGeminiImage = async (prompt: string, productData: any, plan: P
         if (!ai) throw new Error("No Gemini Key");
         
         // Use Pro model only for 'pro' plan, otherwise standard flash model
-        // This avoids 403 errors if the key doesn't support the preview model
         const isPro = plan === 'pro';
         const model = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
         
@@ -98,9 +112,10 @@ const generateWithGeminiImage = async (prompt: string, productData: any, plan: P
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
         }
-    } catch (e) {
-        console.error("Gemini Image Gen Error:", e);
-        // If Pro model fails, try fallback to Flash model
+    } catch (e: any) {
+        console.error("Gemini Image Gen Error:", e.message || e);
+        
+        // If Pro model fails (e.g. 403, 404, or not enabled), fallback to Flash
         if (plan === 'pro') {
             console.log("🔄 Retrying with Flash model...");
             return generateWithGeminiImage(prompt, productData, 'free');
@@ -174,8 +189,8 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
         const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
         return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
 
-    } catch (e) {
-        console.error("Animation Error:", e);
+    } catch (e: any) {
+        console.error("Animation Error:", e.message || e);
         return null;
     }
 };
@@ -208,6 +223,7 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
 
     // 2. Fallback Media
     if (!mediaUrl) {
+         // Fallback to placeholder if AI fails
          mediaUrl = `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name || "Error")}`;
     }
 
