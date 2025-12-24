@@ -37,26 +37,27 @@ Deno.serve(async (req: Request) => {
           REQUIREMENTS: Spanish. AIDA framework. 3-5 hashtags. Emojis.
         `;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-            config: { 
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        copy: { type: Type.STRING },
-                        hashtags: { type: Type.ARRAY, items: { type: Type.STRING } }
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: prompt,
+                config: { 
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                        type: Type.OBJECT,
+                        properties: {
+                            copy: { type: Type.STRING },
+                            hashtags: { type: Type.ARRAY, items: { type: Type.STRING } }
+                        }
                     }
                 }
-            }
-        });
-        
-        const result = JSON.parse(response.text || '{"copy": "", "hashtags": []}');
-        
-        return new Response(JSON.stringify(result), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            });
+            const result = JSON.parse(response.text || '{"copy": "", "hashtags": []}');
+            return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } catch (e) {
+            // Fallback si falla el JSON
+            return new Response(JSON.stringify({ copy: `${productData.name} - ${productData.benefit}`, hashtags: ["#sellfy"] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
     }
 
     // B. Regenerar Texto
@@ -74,7 +75,7 @@ Deno.serve(async (req: Request) => {
         });
     }
 
-    // C. Generar Imagen Visual - LÓGICA DE FIDELIDAD Y BRANDING
+    // C. Generar Imagen Visual - FIDELIDAD MÁXIMA (Gemini 2.5 Flash Image)
     if (action === 'generate_visual') {
         const { angle, state, settings } = payload;
         const { productData, visualStyle } = state;
@@ -82,42 +83,39 @@ Deno.serve(async (req: Request) => {
         const parts = [];
         let promptText = "";
 
-        // Si hay una imagen base, usamos un prompt de COMPOSICIÓN estricta
         if (state.productData.baseImage) {
+           // ESTRATEGIA DE EDICIÓN (Inpainting/Compositing)
+           // Usamos 2.5 Flash Image porque respeta mejor la instrucción de "NO TOCAR EL PRODUCTO".
            promptText = `
-             TASK: Professional Product Photography Compositing.
+             You are a professional product photographer editor.
              
-             INSTRUCTION FOR THE PRODUCT (FOREGROUND):
-             - **DO NOT REDRAW THE PRODUCT**.
-             - **DO NOT ALTER THE LABEL OR SHAPE**.
-             - Use the object in the input image EXACTLY as it is pixel-by-pixel.
+             TASK: Change the background of the image.
              
-             INSTRUCTION FOR THE BACKGROUND:
-             1. **BRAND COLORS**: You MUST incorporate the brand colors into the lighting, shadows, or background props.
-                - Primary Color: ${settings.primaryColor} (Use as main ambient light or background surface).
-                - Secondary Color: ${settings.secondaryColor} (Use for rim lighting or small details).
+             CRITICAL RULES:
+             1. **KEEP THE PRODUCT EXACTLY AS IS**. Do not redraw it, do not distort it.
+             2. Use the provided image as the absolute source of truth for the product.
              
-             2. **MOOD & ATMOSPHERE**: Use the text "${productData.benefit}" ONLY to define the vibe (e.g. energetic, calm, luxury), NOT to change the product appearance.
-             
-             3. **SCENE**: ${visualStyle} style. ${angle} perspective.
-             
-             OUTPUT: 4K Photorealistic Image. High fidelity.
+             BACKGROUND INSTRUCTIONS:
+             - Style: ${visualStyle}.
+             - Colors: Use ${settings.primaryColor} and ${settings.secondaryColor} for lighting and background elements.
+             - Mood: ${productData.benefit}.
+             - Angle: ${angle} (Apply this to the background perspective only).
            `;
         } else {
-           // Si NO hay imagen base, permitimos generación creativa, pero con branding forzado
+           // GENERACIÓN DESDE CERO
            promptText = `
-             Create a photorealistic product shot for "${productData.name}".
+             Create a professional product photo for "${productData.name}".
              
-             BRANDING GUIDELINES:
-             - Dominant Color: ${settings.primaryColor}
-             - Accent Color: ${settings.secondaryColor}
+             BRAND COLORS:
+             - Main: ${settings.primaryColor}
+             - Accent: ${settings.secondaryColor}
              
-             SCENE DETAILS:
+             DETAILS:
              - Style: ${visualStyle}
              - Angle: ${angle}
-             - Vibe: ${productData.benefit}
+             - Context: ${productData.benefit}
              
-             Quality: 4k, Commercial Photography.
+             High quality, 4k.
            `;
         }
 
@@ -136,14 +134,14 @@ Deno.serve(async (req: Request) => {
         }
 
         try {
-            // Usamos Gemini 3 Pro. Es el mejor modelo para seguir instrucciones complejas de color y composición.
+            // CAMBIO: Usamos gemini-2.5-flash-image para mejor fidelidad en edición
             const response = await ai.models.generateContent({
-                model: 'gemini-3-pro-image-preview', 
+                model: 'gemini-2.5-flash-image', 
                 contents: { parts: parts },
+                // Nota: gemini-2.5-flash-image NO soporta aspect ratio configurable dinámicamente en todas las versiones,
+                // pero lo intentamos pasar por si acaso, o dejamos default.
                 config: {
-                    imageConfig: {
-                        aspectRatio: "1:1",
-                    }
+                    // responseMimeType: "image/jpeg" // No soportado en nano banana
                 }
             });
 
@@ -166,7 +164,7 @@ Deno.serve(async (req: Request) => {
         } catch (e) {
             console.error("Image gen failed:", e);
             return new Response(JSON.stringify({ 
-                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`, 
+                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=Error+Generando+Imagen`, 
                 isVideo: false,
                 error: e.message
             }), {
@@ -185,7 +183,7 @@ Deno.serve(async (req: Request) => {
         try {
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic slow motion, commercial product lighting, 4k.",
+                prompt: "Cinematic slow motion, commercial product lighting, 4k resolution.",
                 image: { 
                     imageBytes: matches[2], 
                     mimeType: matches[1] 
@@ -210,26 +208,25 @@ Deno.serve(async (req: Request) => {
     if (action === 'get_video_operation') {
         const { operationName } = payload;
         
+        if (!operationName) {
+             return new Response(JSON.stringify({ done: false, error: "Missing operationName" }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
         try {
-            // CORRECCIÓN PARA ERROR 500:
-            // Usamos el método genérico `getOperation` pasando el nombre como objeto.
-            // Esto es más estable que `getVideosOperation` en ciertas versiones del SDK.
-            const operation = await ai.operations.getOperation({ name: operationName });
+            // Usamos getVideosOperation específicamente para Veo
+            const operation = await ai.operations.getVideosOperation({ name: operationName });
             
             let videoUri = null;
             
             if (operation.done) {
-                 // La estructura de respuesta puede variar según el endpoint, revisamos ambas posibilidades
-                 // @ts-ignore
+                 // Estructura segura con optional chaining
                  const rawUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-                 // @ts-ignore
-                 const resultUri = operation.result?.generatedVideos?.[0]?.video?.uri; // Fallback común
-
-                 const finalUri = rawUri || resultUri;
-
-                 if (finalUri) {
-                     // Adjuntar API Key es vital para que el frontend pueda descargar el video
-                     videoUri = `${finalUri}&key=${apiKey}`;
+                 
+                 if (rawUri) {
+                     // Adjuntar API Key es vital
+                     videoUri = `${rawUri}&key=${apiKey}`;
                  }
             }
 
@@ -240,11 +237,14 @@ Deno.serve(async (req: Request) => {
         } catch (e) {
             console.error("Polling crash avoided:", e);
             
-            // IMPORTANTE: Devolvemos 200 OK con un JSON de error.
-            // Esto evita que el browser muestre "500 Internal Server Error" y permite al frontend manejarlo.
+            // BLINDAJE ANTI-500:
+            // Si algo falla aquí, devolvemos 200 OK con un JSON que dice "done: false"
+            // Esto permite que el polling continúe o falle suavemente en el cliente, 
+            // en lugar de romper la Edge Function.
             return new Response(JSON.stringify({ 
                 done: false, 
-                error: `Polling Error: ${e.message || 'Unknown'}` 
+                // No enviamos 'error' para que el polling intente de nuevo si es un timeout temporal
+                debugError: e.message 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -255,8 +255,9 @@ Deno.serve(async (req: Request) => {
 
   } catch (error: any) {
     // Catch-all global
+    // Siempre devuelve 200 OK con el error en el cuerpo para evitar que el cliente reciba 500 HTML genérico
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 200, // Devolvemos 200 para que el cliente pueda leer el mensaje de error
+      status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
