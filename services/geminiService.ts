@@ -5,8 +5,6 @@ import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier
 // --- HELPER: Invocador Seguro ---
 
 const invokeAI = async (action: string, payload: any) => {
-  console.log(`📡 Llamando a Edge Function: ${action}`);
-  
   // Llama a la Edge Function 'sellfy-api' desplegada en Supabase
   const { data, error } = await supabase.functions.invoke('sellfy-api', {
     body: { action, ...payload }
@@ -14,12 +12,13 @@ const invokeAI = async (action: string, payload: any) => {
 
   if (error) {
     console.error(`Edge Function Error (${action}):`, error);
-    // Si el error es de conexión o timeout, damos un mensaje amigable
-    throw new Error("Error de conexión con el servidor de IA. Por favor intenta de nuevo.");
+    // Si es un error de red o timeout
+    throw new Error("Error de conexión con la IA. Verifica tu internet.");
   }
 
-  // Si la función devuelve un error explícito en el JSON
+  // Si la función devuelve un error explícito en el JSON (manejado por nuestro try-catch global en el backend)
   if (data && data.error) {
+    console.error(`API Logic Error (${action}):`, data.error);
     throw new Error(data.error);
   }
 
@@ -28,7 +27,7 @@ const invokeAI = async (action: string, payload: any) => {
 
 // --- GENERADORES ---
 
-// 1. Generar Textos (Copy) - Server-side
+// 1. Generar Textos (Copy)
 export const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   try {
     const result = await invokeAI('generate_copy', {
@@ -47,7 +46,7 @@ export const generateVariantCopy = async (state: WizardState, settings: Business
   }
 };
 
-// 2. Regenerar solo texto - Server-side
+// 2. Regenerar solo texto
 export const regenerateCopyOnly = async (productName: string, platform: string, tone: string): Promise<string> => {
   try {
     const { text } = await invokeAI('regenerate_copy', {
@@ -58,44 +57,60 @@ export const regenerateCopyOnly = async (productName: string, platform: string, 
     return text;
   } catch (e) {
     console.error(e);
-    return "Error al regenerar texto. Intenta de nuevo.";
+    return "Error al regenerar texto.";
   }
 };
 
-// 3. Animación de Video (Veo) - Server-side Initiation & Polling
+// 3. Animación de Video (Veo)
 export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
   try {
     console.log("🎥 Iniciando animación en servidor...");
     
     // Paso 1: Iniciar operación
-    const { operationName } = await invokeAI('animate_image', {
+    const response = await invokeAI('animate_image', {
       image: imageBase64
     });
 
-    if (!operationName) throw new Error("No se recibió ID de operación");
+    if (!response || !response.operationName) {
+        throw new Error("No se recibió ID de operación del servidor.");
+    }
+    
+    const { operationName } = response;
+    console.log(`Operación iniciada: ${operationName}`);
 
     // Paso 2: Polling (Preguntar estado)
     let attempts = 0;
-    const maxAttempts = 24; // ~2 minutos (5s intervalo)
-
+    const maxAttempts = 60; // Aumentado a 5 minutos (5s * 60) para dar tiempo a Veo
+    
     while (attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 5000)); // Esperar 5s
         attempts++;
         
+        console.log(`Verificando video (Intento ${attempts}/${maxAttempts})...`);
         const status = await invokeAI('get_video_operation', { operationName });
         
-        if (status.done && status.videoUri) {
-            return status.videoUri; 
+        if (status.done) {
+            if (status.videoUri) {
+                console.log("¡Video completado!");
+                return status.videoUri;
+            } else {
+                console.error("Operación terminada pero sin URI de video", status);
+                throw new Error("Video generado pero URL no encontrada.");
+            }
         }
         
-        console.log(`Procesando video... ${attempts}/${maxAttempts}`);
+        // Si hay un error de depuración en el backend, lo logueamos pero seguimos intentando
+        if (status.debugError) {
+             console.warn("Polling warning:", status.debugError);
+        }
     }
 
-    return null;
+    throw new Error("Tiempo de espera agotado generando video.");
 
-  } catch (e) {
+  } catch (e: any) {
     console.error("Animation Error:", e);
-    return null;
+    // Propagar el mensaje de error para que el Toast lo muestre
+    throw new Error(e.message || "Error generando video");
   }
 };
 
@@ -124,15 +139,18 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
         ]);
 
         mediaUrl = mediaResponse.url;
+        // Si devuelve error explícito en la imagen
+        if (mediaResponse.error) {
+             console.error("Error visual:", mediaResponse.error);
+             mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`;
+        }
+
         isVideoResult = mediaResponse.isVideo;
         textData = copyResponse;
 
     } catch (e) {
         console.error("Fallo generando variante:", e);
-        // Fallback visual si falla la IA
         mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}`;
-        
-        // Intentamos recuperar texto aunque falle la imagen
         textData = await generateVariantCopy(state, settings, angle).catch(() => ({ copy: productData.name, hashtags: [] }));
     }
 
@@ -153,7 +171,7 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
       ? ["Dynamic Reveal", "Lifestyle Usage", "Cinematic Mood", "Product Details"] 
       : ["Hero Shot (Centered)", "Lifestyle Context", "Creative Angle", "Close-up Detail"];
 
-  console.log(`🚀 Iniciando campaña segura vía Edge Functions...`);
+  console.log(`🚀 Iniciando campaña...`);
 
   const variants: ContentVariant[] = [];
   

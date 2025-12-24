@@ -1,6 +1,6 @@
 
 // @ts-nocheck
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type } from "https://esm.sh/@google/genai";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,27 +8,27 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // 1. Handle CORS
+  // 1. Manejo de CORS (Preflight)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    // 2. Obtener API Key de forma segura
     const apiKey = Deno.env.get('API_KEY');
     if (!apiKey) {
-      throw new Error("Server Misconfiguration: Missing API_KEY in Edge Function secrets.");
+      return new Response(JSON.stringify({ error: "Server Error: API_KEY missing" }), { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      });
     }
 
     const ai = new GoogleGenAI({ apiKey });
     const { action, ...payload } = await req.json();
 
-    // --- RUTAS DE LA API ---
+    console.log(`[Sellfy API] Ejecutando acción: ${action}`);
 
-    // A. Generar Texto (Copywriting)
+    // --- A. Generar Texto (Copywriting) ---
     if (action === 'generate_copy') {
         const { productData, platform, settings, angle } = payload;
-        
         const prompt = `
           ROLE: Social Media Copywriter for ${settings.industry}.
           TASK: Write a caption for "${productData.name}".
@@ -55,72 +55,32 @@ Deno.serve(async (req: Request) => {
             const result = JSON.parse(response.text || '{"copy": "", "hashtags": []}');
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (e) {
-            // Fallback si falla el JSON
+            console.error("Error copy:", e);
+            // Fallback seguro
             return new Response(JSON.stringify({ copy: `${productData.name} - ${productData.benefit}`, hashtags: ["#sellfy"] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
     }
 
-    // B. Regenerar Texto
+    // --- B. Regenerar Texto ---
     if (action === 'regenerate_copy') {
         const { productName, platform, tone } = payload;
         const prompt = `Rewrite caption for "${productName}". Platform: ${platform}. Tone: ${tone}. Spanish. Short.`;
-        
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
-        
-        return new Response(JSON.stringify({ text: response.text }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // C. Generar Imagen Visual - FIDELIDAD MÁXIMA (Gemini 2.5 Flash Image)
+    // --- C. Generar Imagen Visual (Alta Fidelidad) ---
     if (action === 'generate_visual') {
         const { angle, state, settings } = payload;
         const { productData, visualStyle } = state;
 
         const parts = [];
-        let promptText = "";
 
-        if (state.productData.baseImage) {
-           // ESTRATEGIA DE EDICIÓN (Inpainting/Compositing)
-           // Usamos 2.5 Flash Image porque respeta mejor la instrucción de "NO TOCAR EL PRODUCTO".
-           promptText = `
-             You are a professional product photographer editor.
-             
-             TASK: Change the background of the image.
-             
-             CRITICAL RULES:
-             1. **KEEP THE PRODUCT EXACTLY AS IS**. Do not redraw it, do not distort it.
-             2. Use the provided image as the absolute source of truth for the product.
-             
-             BACKGROUND INSTRUCTIONS:
-             - Style: ${visualStyle}.
-             - Colors: Use ${settings.primaryColor} and ${settings.secondaryColor} for lighting and background elements.
-             - Mood: ${productData.benefit}.
-             - Angle: ${angle} (Apply this to the background perspective only).
-           `;
-        } else {
-           // GENERACIÓN DESDE CERO
-           promptText = `
-             Create a professional product photo for "${productData.name}".
-             
-             BRAND COLORS:
-             - Main: ${settings.primaryColor}
-             - Accent: ${settings.secondaryColor}
-             
-             DETAILS:
-             - Style: ${visualStyle}
-             - Angle: ${angle}
-             - Context: ${productData.benefit}
-             
-             High quality, 4k.
-           `;
-        }
-
-        parts.push({ text: promptText });
-
+        // 1. IMPORTANTE: La imagen va PRIMERO en el array de partes.
+        // Esto le indica al modelo que la imagen es la fuente de verdad primaria.
         if (state.productData.baseImage) {
             const matches = state.productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
@@ -133,18 +93,46 @@ Deno.serve(async (req: Request) => {
             }
         }
 
+        // 2. Prompt estricto de edición
+        let promptText = "";
+        if (state.productData.baseImage) {
+           promptText = `
+             You are a professional product photo editor.
+             
+             STRICT INSTRUCTION:
+             - **DO NOT CHANGE THE PRODUCT**. Use the input image as the absolute reference.
+             - Only change the background and lighting.
+             
+             SCENE:
+             - Style: ${visualStyle}.
+             - Brand Colors to use in background: ${settings.primaryColor} and ${settings.secondaryColor}.
+             - Mood: ${productData.benefit}.
+             - Angle: ${angle} (Camera angle relative to the product).
+           `;
+        } else {
+           promptText = `
+             Create a professional product photo for "${productData.name}".
+             Style: ${visualStyle}.
+             Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
+             Context: ${productData.benefit}.
+             Angle: ${angle}.
+             High quality, photorealistic, 4k.
+           `;
+        }
+        parts.push({ text: promptText });
+
         try {
-            // CAMBIO: Usamos gemini-2.5-flash-image para mejor fidelidad en edición
+            // USAMOS GEMINI 2.5 FLASH IMAGE
+            // Este modelo respeta mucho mejor la imagen de referencia que el Gemini 3 Pro.
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image', 
                 contents: { parts: parts },
-                // Nota: gemini-2.5-flash-image NO soporta aspect ratio configurable dinámicamente en todas las versiones,
-                // pero lo intentamos pasar por si acaso, o dejamos default.
                 config: {
-                    // responseMimeType: "image/jpeg" // No soportado en nano banana
+                    // No usamos responseMimeType aquí porque nano banana no lo soporta bien
                 }
             });
 
+            // Buscar la parte de imagen en la respuesta (puede venir mezclada con texto)
             let b64 = null;
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
@@ -160,37 +148,36 @@ Deno.serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
                 });
             }
-            throw new Error("No image generated.");
+            throw new Error("La IA no generó una imagen válida.");
         } catch (e) {
             console.error("Image gen failed:", e);
             return new Response(JSON.stringify({ 
-                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=Error+Generando+Imagen`, 
-                isVideo: false,
-                error: e.message
+                url: null, 
+                error: `Image Error: ${e.message}`
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
     }
 
-    // D. Animar Imagen (Video - Veo)
+    // --- D. Animar Imagen (Video - Veo) ---
     if (action === 'animate_image') {
         const { image } = payload; 
-        const matches = image.match(/^data:([^;]+);base64,(.+)$/);
         
-        if (!matches) throw new Error("Invalid image format");
-
         try {
+            const matches = image.match(/^data:([^;]+);base64,(.+)$/);
+            if (!matches) throw new Error("Formato de imagen inválido");
+
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic slow motion, commercial product lighting, 4k resolution.",
+                prompt: "Cinematic product showcase, slow motion, professional lighting, 4k.",
                 image: { 
                     imageBytes: matches[2], 
                     mimeType: matches[1] 
                 },
                 config: { 
                     numberOfVideos: 1,
-                    resolution: '720p',
+                    resolution: '720p', // Veo Fast suele ser mejor en 720p
                     aspectRatio: '9:16'
                 }
             });
@@ -199,12 +186,14 @@ Deno.serve(async (req: Request) => {
                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         } catch (e) {
-            console.error("Video creation failed:", e);
-            throw new Error(`Video init failed: ${e.message}`);
+            console.error("Video init failed:", e);
+            return new Response(JSON.stringify({ error: `Video Init Error: ${e.message}` }), {
+                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
         }
     }
 
-    // E. Consultar Estado del Video (Polling)
+    // --- E. Consultar Estado Video (Polling) ---
     if (action === 'get_video_operation') {
         const { operationName } = payload;
         
@@ -215,14 +204,18 @@ Deno.serve(async (req: Request) => {
         }
 
         try {
-            // Usamos getVideosOperation específicamente para Veo
-            const operation = await ai.operations.getVideosOperation({ name: operationName });
+            // CORRECCIÓN CLAVE: Usamos getVideosOperation pasando el objeto operation reconstruido
+            // Esto evita el error 500 si getOperation genérico falla.
+            const operation = await ai.operations.getVideosOperation({ 
+                operation: { name: operationName } 
+            });
             
             let videoUri = null;
             
             if (operation.done) {
-                 // Estructura segura con optional chaining
-                 const rawUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+                 // Estructura de respuesta de Veo
+                 const generatedVideo = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
+                 const rawUri = generatedVideo?.video?.uri;
                  
                  if (rawUri) {
                      // Adjuntar API Key es vital
@@ -235,15 +228,10 @@ Deno.serve(async (req: Request) => {
             });
 
         } catch (e) {
-            console.error("Polling crash avoided:", e);
-            
-            // BLINDAJE ANTI-500:
-            // Si algo falla aquí, devolvemos 200 OK con un JSON que dice "done: false"
-            // Esto permite que el polling continúe o falle suavemente en el cliente, 
-            // en lugar de romper la Edge Function.
+            console.error("Polling error:", e);
+            // Devolvemos 200 OK con done: false para que el cliente no crashee y siga intentando
             return new Response(JSON.stringify({ 
                 done: false, 
-                // No enviamos 'error' para que el polling intente de nuevo si es un timeout temporal
                 debugError: e.message 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -251,12 +239,15 @@ Deno.serve(async (req: Request) => {
         }
     }
 
-    throw new Error(`Unknown action: ${action}`);
+    // Acción desconocida
+    return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
 
   } catch (error: any) {
-    // Catch-all global
-    // Siempre devuelve 200 OK con el error en el cuerpo para evitar que el cliente reciba 500 HTML genérico
-    return new Response(JSON.stringify({ error: error.message }), {
+    // CATCH-ALL GLOBAL: Esto previene que la Edge Function devuelva 500 HTML
+    console.error("Global Error Handler:", error.message);
+    return new Response(JSON.stringify({ error: `System Error: ${error.message}` }), {
       status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
