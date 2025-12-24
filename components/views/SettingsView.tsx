@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Briefcase, Link as LinkIcon, Users, Palette, Save, Check } from 'lucide-react';
+import { Briefcase, Link as LinkIcon, Users, Palette, Save, Check, MousePointerClick } from 'lucide-react';
 import { BusinessSettings } from '../../types';
 import { useToast } from '../ui/Toast';
 
@@ -27,8 +27,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, updateSett
 
   const handleSaveSimulated = () => {
     setIsSaving(true);
-    // En el modo Supabase, updateSettings ya guarda en la DB cada vez que se llama,
-    // pero simularemos un pequeño delay para dar feedback visual de "Guardado".
     setTimeout(() => {
         setIsSaving(false);
         addToast("Configuración guardada correctamente en la nube", "success");
@@ -48,31 +46,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, updateSett
           <button
             key={color}
             onClick={() => updateSettings(onChangeField, color)}
-            className={`w-6 h-6 rounded-full border border-white/10 transition-transform hover:scale-110 flex items-center justify-center ${value === color ? 'ring-2 ring-white ring-offset-2 ring-offset-[#0B0F19]' : ''}`}
+            className={`w-8 h-8 rounded-full border border-white/10 transition-transform hover:scale-110 flex items-center justify-center ${value === color ? 'ring-2 ring-white ring-offset-2 ring-offset-[#0B0F19]' : ''}`}
             style={{ backgroundColor: color }}
+            title={color}
           >
-            {value === color && <Check size={12} className={color === '#ffffff' ? 'text-black' : 'text-white'} />}
+            {value === color && <Check size={14} className={color === '#ffffff' ? 'text-black' : 'text-white'} />}
           </button>
         ))}
       </div>
 
-      {/* Input Custom */}
-      <div className="flex items-center gap-3 bg-[#020617]/50 border border-white/10 rounded-xl p-2 pr-4">
-        <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-white/10 shrink-0">
-           <input 
-            type="color" 
-            value={value}
-            onChange={(e) => updateSettings(onChangeField, e.target.value)}
-            className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer border-none p-0" 
-          />
+      {/* Input Custom con etiqueta clara */}
+      <div className="relative group">
+          <div className="flex items-center gap-3 bg-[#020617]/50 border border-white/10 rounded-xl p-2 pr-4 hover:border-indigo-500/50 transition-colors">
+            <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-white/10 shrink-0 cursor-pointer shadow-sm">
+            <input 
+                type="color" 
+                value={value}
+                onChange={(e) => updateSettings(onChangeField, e.target.value)}
+                className="absolute -top-4 -left-4 w-20 h-20 cursor-pointer p-0" 
+            />
+            </div>
+            <div className="flex-1 flex flex-col justify-center">
+                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Personalizado</span>
+                <input 
+                type="text" 
+                value={value}
+                onChange={(e) => updateSettings(onChangeField, e.target.value)}
+                className="bg-transparent text-white text-sm focus:outline-none font-mono uppercase w-full"
+                placeholder="#000000"
+                />
+            </div>
+            <MousePointerClick size={16} className="text-slate-600 group-hover:text-indigo-400 transition-colors" />
         </div>
-        <input 
-          type="text" 
-          value={value}
-          onChange={(e) => updateSettings(onChangeField, e.target.value)}
-          className="flex-1 bg-transparent text-white text-sm focus:outline-none font-mono uppercase"
-          placeholder="#000000"
-        />
       </div>
     </div>
   );
@@ -173,7 +178,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, updateSett
                <h3 className="font-bold text-lg text-white">Estilo Visual</h3>
              </div>
 
-             <div className="space-y-6">
+             <div className="space-y-8">
                <ColorPicker 
                   label="Color Primario" 
                   value={settings.primaryColor} 

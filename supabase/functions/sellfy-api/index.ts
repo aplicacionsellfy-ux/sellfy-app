@@ -80,35 +80,33 @@ Deno.serve(async (req: Request) => {
         });
     }
 
-    // C. Generar Imagen Visual - Gemini 2.5 Flash Image (Nano Banana)
+    // C. Generar Imagen Visual - Gemini 3 Pro Image (Mayor fidelidad)
     if (action === 'generate_visual') {
         const { angle, state, settings } = payload;
         const { productData, visualStyle } = state;
 
-        // Construcción del contenido multimodal
         const parts = [];
 
-        // 1. Mensaje de Texto (Prompt) - Estricto sobre la fidelidad
+        // Prompt reforzado para fidelidad
         let promptText = `
-          Generate a high-quality product photography of the product shown in the input image.
+          TASK: Create a professional product photograph compositing the PRODUCT provided in the image into a new background.
           
-          CRITICAL INSTRUCTIONS:
-          - You MUST preserve the exact product appearance (packaging, label, logo, colors, shape) from the reference image. Do not invent a new bottle or logo.
-          - Place the product in a ${visualStyle} setting.
-          - Composition: ${angle}.
-          - Lighting: Studio lighting, high quality, 4k.
-          - Brand Colors to integrate in background: ${settings.primaryColor}.
+          STRICT VISUAL RULES:
+          1. **DO NOT ALTER THE PRODUCT**: The object in the input image MUST remain exactly the same (same logo, label, shape, color). Do not hallucinate a new bottle or packaging.
+          2. **BACKGROUND**: Place the product in a ${visualStyle} environment.
+          3. **COMPOSITION**: ${angle}.
+          4. **BRANDING**: Subtly integrate the brand color ${settings.primaryColor} into the lighting or props.
+          
+          OUTPUT: High resolution, photorealistic, 4k.
         `;
         
         if (!state.productData.baseImage) {
-           promptText += `\n(No reference image provided, generate a generic product matching description: ${productData.name})`;
+           promptText += `\n(NOTE: No reference image provided. Create a generic product matching name: ${productData.name})`;
         }
 
         parts.push({ text: promptText });
 
-        // 2. Imagen Base (Si existe)
         if (state.productData.baseImage) {
-            // Extraer base64 crudo (remover 'data:image/jpeg;base64,')
             const matches = state.productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
                 parts.push({
@@ -121,12 +119,10 @@ Deno.serve(async (req: Request) => {
         }
 
         try {
-            // Usamos Gemini 2.5 Flash Image que soporta input de imagen
+            // Usamos Gemini 3 Pro Image Preview para mejor obediencia al prompt de "no cambiar el producto"
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image',
-                contents: {
-                    parts: parts,
-                },
+                model: 'gemini-3-pro-image-preview', 
+                contents: { parts: parts },
                 config: {
                     imageConfig: {
                         aspectRatio: "1:1",
@@ -134,7 +130,6 @@ Deno.serve(async (req: Request) => {
                 }
             });
 
-            // Iterar para encontrar la parte de la imagen
             let b64 = null;
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
@@ -153,9 +148,8 @@ Deno.serve(async (req: Request) => {
             throw new Error("No image generated in response parts");
         } catch (e) {
             console.error("Image gen failed:", e);
-            // Fallback en caso de error
             return new Response(JSON.stringify({ 
-                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name)}`, 
+                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`, 
                 isVideo: false,
                 error: e.message
             }), {
@@ -174,7 +168,7 @@ Deno.serve(async (req: Request) => {
         try {
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic slow motion product reveal, professional lighting, maintaining product fidelity.",
+                prompt: "Cinematic product motion, professional commercial lighting, slow motion 60fps.",
                 image: { 
                     imageBytes: matches[2], 
                     mimeType: matches[1] 
@@ -200,16 +194,18 @@ Deno.serve(async (req: Request) => {
         const { operationName } = payload;
         
         try {
-            // Fix: La librería espera 'name' directamente en la llamada si es por nombre
-            // o un objeto operation si se pasa el objeto completo.
-            // Para ser seguros con la versión de Edge, pasamos name como propiedad.
-            const operation = await ai.operations.getVideosOperation({ name: operationName });
+            // CORRECCIÓN: La SDK espera la propiedad 'operation' con un objeto que tenga 'name'.
+            // Esto corrige el error 500 "invalid argument" o crash interno.
+            const operation = await ai.operations.getVideosOperation({ 
+                operation: { name: operationName } 
+            });
             
             let videoUri = null;
             if (operation.done) {
                  // @ts-ignore
                  const rawUri = operation.response?.generatedVideos?.[0]?.video?.uri;
                  if (rawUri) {
+                     // Adjuntar API Key para descargar
                      videoUri = `${rawUri}&key=${apiKey}`;
                  }
             }
@@ -218,8 +214,8 @@ Deno.serve(async (req: Request) => {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         } catch (e) {
-            console.error("Polling error:", e);
-            // Devolver 200 con error JSON para evitar el 500 fatal en el cliente
+            console.error("Polling error details:", e);
+            // Retornamos 200 con el error en JSON para que el frontend pueda manejarlo sin explotar
             return new Response(JSON.stringify({ done: false, error: e.message }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
