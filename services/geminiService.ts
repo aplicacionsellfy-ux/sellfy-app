@@ -1,8 +1,7 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier, ContentType, Platform } from "../types";
 
-// --- GESTIÓN DE CLAVES API ---
+// --- CONFIGURATION ---
 const getGeminiKey = () => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
@@ -14,139 +13,146 @@ const getGeminiKey = () => {
 const GEMINI_API_KEY = getGeminiKey();
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
-// --- UTILIDADES ---
-async function retryOperation<T>(operation: () => Promise<T>, retries = 2, delay = 1000): Promise<T> {
-  try {
-    return await operation();
-  } catch (error: any) {
-    if (retries <= 0) throw error;
-    // Manejo inteligente de Rate Limits
-    const waitTime = error.message?.includes('429') || error.message?.includes('quota') ? delay * 3 : delay;
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-    return retryOperation(operation, retries - 1, delay * 2);
-  }
-}
-
+// Helper to sanitize JSON response
 const cleanJsonText = (text: string | undefined): string => {
   if (!text) return '{}';
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
 };
 
-// --- COPYWRITING (AIDA/PAS) ---
+// --- GENERATORS ---
+
+// 1. Copywriting Generator
 const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   const { platform, productData } = state;
   
-  const prompt = `
-    ROLE: World-Class Direct Response Copywriter.
-    TASK: Write a persuasive social media caption for the product "${productData.name}".
-    LANGUAGE: Spanish (Native, persuasive, natural).
-    
-    PRODUCT DETAILS:
-    - Main Benefit: "${productData.benefit}"
-    - Offer/Promo: "${productData.promoDetails || 'N/A'}"
-    - Audience: "${productData.targetAudience || settings.targetAudience}"
-    - Tone: "${settings.tone}"
-    - Context: "${angleDescription}"
-    - Platform: "${platform}"
-
-    MANDATORY FRAMEWORK (Use AIDA):
-    1. ATTENTION (Hook): Stop the scroll.
-    2. INTEREST: Elaborate on the problem/solution.
-    3. DESIRE: Highlight the transformation.
-    4. ACTION (CTA): Clear instruction.
-
-    OUTPUT FORMAT (JSON ONLY):
-    { 
-      "copy": "Full caption text...", 
-      "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"] 
-    }
-  `;
+  // Default fallback
+  const fallback = { 
+    copy: `${productData.name} - ${productData.benefit} 🔥\n\n¡Consíguelo ahora!`, 
+    hashtags: ["#sellfy", "#viral", "#fyp"] 
+  };
 
   try {
-    if (!ai) throw new Error("Gemini API Key missing");
-    
-    const response = await retryOperation(() => ai.models.generateContent({
-      model: 'gemini-2.5-flash', 
+    if (!ai) return fallback;
+
+    const prompt = `
+      ROLE: Expert Social Media Copywriter.
+      TASK: Write a caption for "${productData.name}".
+      PLATFORM: ${platform}.
+      CONTEXT: ${angleDescription}.
+      TONE: ${settings.tone}.
+      BENEFIT: ${productData.benefit}.
+      
+      REQUIREMENTS:
+      - Use AIDA framework.
+      - Add emojis.
+      - 3-5 hashtags.
+      
+      OUTPUT JSON: { "copy": "string", "hashtags": ["string"] }
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
       contents: prompt,
-      config: { 
-        responseMimeType: 'application/json',
-        temperature: 0.85 
-      }
-    }));
-    
+      config: { responseMimeType: 'application/json' }
+    });
+
     const result = JSON.parse(cleanJsonText(response.text));
     return {
-      copy: result.copy,
-      hashtags: result.hashtags || []
+      copy: result.copy || fallback.copy,
+      hashtags: result.hashtags || fallback.hashtags
     };
   } catch (error) {
-    console.error("Copy Gen Error:", error);
-    return { 
-      copy: `🔥 ${productData.name}\n\n${productData.benefit}\n\n¡Haz tu pedido hoy mismo! 👇`, 
-      hashtags: ["#sellfy", "#tendencia", "#oferta"] 
-    };
+    console.warn("Copy Gen Error:", error);
+    return fallback;
   }
 };
 
-// --- GENERACIÓN DE IMAGEN (GEMINI 3 PRO) ---
-const generateWithGeminiImage = async (prompt: string, productData: any): Promise<string | null> => {
-    if (!ai) throw new Error("No Gemini Key");
-    
-    const parts: any[] = [];
-    // Usamos Gemini 3 Pro para máxima fidelidad
-    const model = 'gemini-3-pro-image-preview'; 
-    
-    if (productData.baseImage) {
-        const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
-        if (matches) {
-            parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
-            
-            prompt = `
-              CRITICAL TASK: Product placement.
-              1. ANALYZE the input image. Isolate the main product.
-              2. KEEP THE PRODUCT EXACTLY AS IT IS.
-              3. GENERATE a new background: "${prompt}".
-              4. INTEGRATE the product naturally.
-              5. OUTPUT: High-resolution commercial photography.
-            `;
-        }
-    } else {
-       prompt = `Professional commercial photography of ${prompt}. 8k resolution, highly detailed.`;
-    }
-
-    parts.push({ text: prompt });
-    
+// 2. Image Generator (Adaptive Model Selection)
+const generateWithGeminiImage = async (prompt: string, productData: any, plan: PlanTier): Promise<string | null> => {
     try {
-        const response = await retryOperation(() => ai.models.generateContent({
+        if (!ai) throw new Error("No Gemini Key");
+        
+        // Use Pro model only for 'pro' plan, otherwise standard flash model
+        // This avoids 403 errors if the key doesn't support the preview model
+        const isPro = plan === 'pro';
+        const model = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
+        
+        const parts: any[] = [];
+        if (productData.baseImage) {
+            const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
+            if (matches) {
+                parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
+            }
+        }
+        parts.push({ text: prompt });
+
+        console.log(`🎨 Generating image with ${model}...`);
+        
+        const response = await ai.models.generateContent({
             model: model,
             contents: { parts },
-            config: { 
-                imageConfig: { imageSize: '1K', aspectRatio: '1:1' }
-            }
-        }));
+            // Only send imageConfig for the Pro model which supports it
+            config: isPro ? { imageConfig: { imageSize: '1K', aspectRatio: '1:1' } } : {}
+        });
 
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
         }
     } catch (e) {
         console.error("Gemini Image Gen Error:", e);
+        // If Pro model fails, try fallback to Flash model
+        if (plan === 'pro') {
+            console.log("🔄 Retrying with Flash model...");
+            return generateWithGeminiImage(prompt, productData, 'free');
+        }
     }
     return null;
 };
 
-// --- ANIMACIÓN DE IMAGEN A VIDEO (GOOGLE VEO) ---
-export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
-    if (!ai) throw new Error("No Gemini Key");
-
-    console.log("🎥 Animando imagen con Veo...");
-    
+// 3. Video Generator (Veo)
+const generateWithVeoText = async (prompt: string): Promise<string | null> => {
     try {
+        if (!ai) throw new Error("No Gemini Key");
+        
+        console.log("🎥 Generating video with Veo...");
+        let operation = await ai.models.generateVideos({
+            model: 'veo-3.1-fast-generate-preview', 
+            prompt: prompt,
+            config: {
+                numberOfVideos: 1,
+                resolution: '720p',
+                aspectRatio: '9:16'
+            }
+        });
+
+        // Poll for completion
+        while (!operation.done) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            // @ts-ignore
+            operation = await ai.operations.getVideosOperation({ operation: operation });
+        }
+        
+        // @ts-ignore
+        const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+        // Append API Key for secure access to the video resource
+        return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
+    } catch (e) { 
+        console.error("Veo Error:", e);
+        return null; 
+    }
+};
+
+// 4. Image-to-Video Animator
+export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
+    try {
+        if (!ai) throw new Error("No Gemini Key");
+
         const matches = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
-        if (!matches) throw new Error("Formato de imagen inválido");
+        if (!matches) throw new Error("Invalid image format");
 
         let operation = await ai.models.generateVideos({
             model: 'veo-3.1-fast-generate-preview', 
-            prompt: "Cinematic slow motion pan, enhancing lighting and product details.",
+            prompt: "Cinematic slow motion movement, high quality.",
             image: {
                 imageBytes: matches[2],
                 mimeType: matches[1]
@@ -159,7 +165,7 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
         });
 
         while (!operation.done) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise(resolve => setTimeout(resolve, 3000));
             // @ts-ignore
             operation = await ai.operations.getVideosOperation({ operation: operation });
         }
@@ -169,43 +175,14 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
         return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
 
     } catch (e) {
-        console.error("Error animando imagen:", e);
+        console.error("Animation Error:", e);
         return null;
     }
 };
 
-// --- GENERACIÓN DE VIDEO TEXT-TO-VIDEO (GOOGLE VEO) ---
-const generateWithVeoText = async (prompt: string): Promise<string | null> => {
-    if (!ai) throw new Error("No Gemini Key");
-    
-    try {
-        console.log("🎥 Generando video Veo Text-to-Video...");
-        let operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview', 
-            prompt: prompt,
-            config: {
-                numberOfVideos: 1,
-                resolution: '720p',
-                aspectRatio: '9:16'
-            }
-        });
+// --- MAIN ORCHESTRATOR ---
 
-        while (!operation.done) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            // @ts-ignore
-            operation = await ai.operations.getVideosOperation({ operation: operation });
-        }
-        // @ts-ignore
-        const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-        return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
-    } catch (e) { 
-        console.error("Error Veo Text:", e);
-        return null; 
-    }
-};
-
-// --- ORQUESTADOR PRINCIPAL ---
-const generateVariantContent = async (index: number, angle: string, state: WizardState, settings: BusinessSettings): Promise<ContentVariant> => {
+const generateVariantContent = async (index: number, angle: string, state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<ContentVariant> => {
     const { productData, platform, visualStyle, contentType } = state;
     
     const isVideoRequest = contentType === ContentType.VIDEO_REEL || platform === Platform.TIKTOK || platform === Platform.IG_REELS;
@@ -213,24 +190,28 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
     const promptText = `
       Product: "${productData.name}" - ${productData.benefit}.
       Style: ${visualStyle}.
-      Angle: ${angle}.
-      Brand Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
+      Composition: ${angle}.
+      Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
+      Vibe: ${settings.tone}.
     `;
 
     let mediaUrl: string | null = null;
     let isVideoResult = false;
 
+    // 1. Generate Media
     if (isVideoRequest) {
-        mediaUrl = await generateWithVeoText(`${promptText}. Cinematic lighting, slow motion movement.`);
+        mediaUrl = await generateWithVeoText(`${promptText}. Cinematic lighting.`);
         isVideoResult = true;
     } else {
-        mediaUrl = await generateWithGeminiImage(promptText, productData);
+        mediaUrl = await generateWithGeminiImage(promptText, productData, plan);
     }
 
+    // 2. Fallback Media
     if (!mediaUrl) {
-         mediaUrl = `https://placehold.co/1080x1080/222/fff?text=${encodeURIComponent("Error IA")}`;
+         mediaUrl = `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name || "Error")}`;
     }
 
+    // 3. Generate Copy
     const textData = await generateVariantCopy(state, settings, angle);
 
     return {
@@ -243,19 +224,22 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
     };
 };
 
-export const generateCampaign = async (state: WizardState, settings: BusinessSettings, _plan: PlanTier): Promise<CampaignResult> => {
+export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const isVideo = state.contentType === ContentType.VIDEO_REEL || state.platform === Platform.TIKTOK || state.platform === Platform.IG_REELS;
   
   const angles = isVideo ? ["Dynamic Reveal", "Lifestyle Use", "Cinematic Atmosphere", "Creative Details"] 
                          : ["Studio Hero Shot", "Lifestyle Context", "Creative Composition", "Detail Focus"];
 
-  console.log(`🚀 Iniciando campaña con Gemini & Veo...`);
+  console.log(`🚀 Starting campaign gen. Plan: ${plan}`);
 
   const variants: ContentVariant[] = [];
+  
+  // Generate variants sequentially to avoid rate limits
   for (let i = 0; i < angles.length; i++) {
-      const variant = await generateVariantContent(i, angles[i], state, settings);
+      const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);
-      if (i < angles.length - 1) await new Promise(r => setTimeout(r, 1000));
+      // Small delay between requests
+      if (i < angles.length - 1) await new Promise(r => setTimeout(r, 500));
   }
 
   return {
