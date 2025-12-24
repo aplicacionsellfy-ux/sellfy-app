@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Camera, Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Camera, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface MobileUploadViewProps {
@@ -54,7 +54,7 @@ export const MobileUploadView: React.FC<MobileUploadViewProps> = ({ sessionId })
 
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Error al subir la imagen");
+      setError(err.message || "Error al subir imagen");
     } finally {
       setUploading(false);
     }

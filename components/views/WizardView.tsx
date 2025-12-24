@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, QrCode, Monitor, Tag, Type } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, Monitor, Tag, Type } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS } from '../../constants';
 import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription } from '../../types';
@@ -48,7 +48,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
   // Mobile Upload State
   const [uploadMethod, setUploadMethod] = useState<'desktop' | 'mobile'>('desktop');
   const [qrSessionId, setQrSessionId] = useState<string | null>(null);
-  const [waitingForMobile, setWaitingForMobile] = useState(false);
 
   const isVideo = 
     state.contentType === ContentType.VIDEO_REEL || 
@@ -97,7 +96,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
     setUploadMethod('mobile');
     if (qrSessionId) return; // Ya existe sesión
 
-    setWaitingForMobile(true);
     try {
         // 1. Crear sesión en DB
         const { data, error } = await supabase
@@ -112,7 +110,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
         setQrSessionId(newSessionId);
 
         // 2. Escuchar cambios en Realtime
-        const channel = supabase.channel(`upload-${newSessionId}`)
+        supabase.channel(`upload-${newSessionId}`)
             .on(
                 'postgres_changes',
                 { event: 'UPDATE', schema: 'public', table: 'upload_sessions', filter: `id=eq.${newSessionId}` },
@@ -127,7 +125,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
                             const reader = new FileReader();
                             reader.onloadend = () => {
                                 updateProductData('baseImage', reader.result as string);
-                                setWaitingForMobile(false);
                             };
                             reader.readAsDataURL(blob);
                         } catch(e) {
@@ -163,7 +160,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
       const generated = await generateCampaign(state, businessSettings, subscription.plan);
       setResult(generated);
       onCampaignCreated(generated); 
-      onDecrementCredit(currentCost); 
+      onDecrementCredit(currentCost); // Enviamos el costo calculado (1 o 5)
       setState(prev => ({ ...prev, step: 6 })); 
       addToast("¡Contenido generado!", "success");
     } catch (e) {
@@ -183,7 +180,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
     });
     setResult(null);
     setQrSessionId(null);
-    setWaitingForMobile(false);
     setUploadMethod('desktop');
   };
 

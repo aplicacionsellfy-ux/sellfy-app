@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { BusinessSettings, UserSubscription, PlanTier } from '../types';
@@ -84,18 +85,16 @@ export function useProfile(userId: string | undefined) {
   const decrementCredits = async (amount: number = 1) => {
     if (!userId) return;
     
-    if (subscription.credits < amount) {
-        addToast("No tienes suficientes créditos", "error");
-        return;
-    }
+    // Validación de seguridad (aunque la UI ya lo previene)
+    if (subscription.credits < amount) return;
 
     // UI Optimista
-    const newCredits = Math.max(0, subscription.credits - amount);
-    setSubscription(prev => ({ ...prev, credits: newCredits }));
+    const newTotal = Math.max(0, subscription.credits - amount);
+    setSubscription(prev => ({ ...prev, credits: newTotal }));
 
     const { error } = await supabase
       .from('profiles')
-      .update({ credits: newCredits })
+      .update({ credits: newTotal })
       .eq('id', userId);
       
     if (error) console.error("Error updating credits", error);
