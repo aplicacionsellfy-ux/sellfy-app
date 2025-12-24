@@ -1,11 +1,13 @@
 
-import React, { useState } from 'react';
-import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, QrCode, Monitor, Tag, Type } from 'lucide-react';
+import QRCode from 'react-qr-code';
 import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS } from '../../constants';
 import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription } from '../../types';
 import { generateCampaign } from '../../services/geminiService';
 import { SelectionCard, VariantCard } from '../Shared';
 import { useToast } from '../ui/Toast';
+import { supabase } from '../../lib/supabase';
 
 interface WizardViewProps {
   businessSettings: BusinessSettings;
@@ -33,7 +35,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
     visualStyle: null,
     productData: {
       name: '',
-      description: '', // Init description
+      description: '', 
       benefit: '',
       targetAudience: '',
       price: '',
@@ -42,6 +44,11 @@ export const WizardView: React.FC<WizardViewProps> = ({
   });
 
   const [result, setResult] = useState<CampaignResult | null>(null);
+  
+  // Mobile Upload State
+  const [uploadMethod, setUploadMethod] = useState<'desktop' | 'mobile'>('desktop');
+  const [qrSessionId, setQrSessionId] = useState<string | null>(null);
+  const [waitingForMobile, setWaitingForMobile] = useState(false);
 
   const isVideo = 
     state.contentType === ContentType.VIDEO_REEL || 
@@ -49,6 +56,15 @@ export const WizardView: React.FC<WizardViewProps> = ({
     state.platform === Platform.IG_REELS;
 
   const currentCost = isVideo ? CREDIT_COSTS.VIDEO : CREDIT_COSTS.IMAGE;
+
+  // Cleanup Subscription on Unmount or Step Change
+  useEffect(() => {
+    return () => {
+      if (qrSessionId) {
+        supabase.removeAllChannels();
+      }
+    };
+  }, [qrSessionId]);
 
   const nextStep = () => setState(prev => ({ ...prev, step: prev.step + 1 }));
   const prevStep = () => setState(prev => ({ ...prev, step: prev.step - 1 }));
@@ -73,6 +89,60 @@ export const WizardView: React.FC<WizardViewProps> = ({
         addToast("Imagen cargada. Nuestra IA mantendrá la fidelidad de tu producto.", "success");
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  // --- MOBILE UPLOAD LOGIC ---
+  const initMobileUpload = async () => {
+    setUploadMethod('mobile');
+    if (qrSessionId) return; // Ya existe sesión
+
+    setWaitingForMobile(true);
+    try {
+        // 1. Crear sesión en DB
+        const { data, error } = await supabase
+            .from('upload_sessions')
+            .insert({})
+            .select()
+            .single();
+
+        if (error) throw error;
+        
+        const newSessionId = data.id;
+        setQrSessionId(newSessionId);
+
+        // 2. Escuchar cambios en Realtime
+        const channel = supabase.channel(`upload-${newSessionId}`)
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'upload_sessions', filter: `id=eq.${newSessionId}` },
+                async (payload) => {
+                    if (payload.new.status === 'completed' && payload.new.image_url) {
+                        addToast("¡Imagen recibida del celular!", "success");
+                        
+                        // Descargar y convertir a Base64 para mantener consistencia con el flujo actual
+                        try {
+                            const res = await fetch(payload.new.image_url);
+                            const blob = await res.blob();
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                updateProductData('baseImage', reader.result as string);
+                                setWaitingForMobile(false);
+                            };
+                            reader.readAsDataURL(blob);
+                        } catch(e) {
+                            console.error("Error fetching image", e);
+                            addToast("Error procesando imagen remota", "error");
+                        }
+                    }
+                }
+            )
+            .subscribe();
+
+    } catch (e) {
+        console.error(e);
+        addToast("Error iniciando sesión remota", "error");
+        setUploadMethod('desktop');
     }
   };
 
@@ -109,13 +179,17 @@ export const WizardView: React.FC<WizardViewProps> = ({
       contentType: null,
       platform: null,
       visualStyle: null,
-      productData: { ...state.productData } 
+      productData: { ...state.productData, baseImage: undefined } // Reset image
     });
     setResult(null);
+    setQrSessionId(null);
+    setWaitingForMobile(false);
+    setUploadMethod('desktop');
   };
 
+  // --- RENDER ---
   if (state.step === 0) {
-    return (
+     return (
       <div className="min-h-screen flex flex-col relative overflow-hidden bg-[#020617]">
         <div className="flex-1 flex flex-col justify-center items-center p-8 text-center max-w-md mx-auto z-10 animate-in fade-in duration-700">
           <div className="w-24 h-24 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-[0_0_30px_rgba(99,102,241,0.4)] mb-8 transform rotate-3 border border-white/10">
@@ -161,7 +235,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
       )}
 
-      {/* STEP 1: Content Type */}
       {state.step === 1 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -183,7 +256,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
-      {/* STEP 2: Platform */}
       {state.step === 2 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -216,7 +288,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
-      {/* STEP 3: Visual Style */}
       {state.step === 3 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -238,7 +309,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
-      {/* STEP 4: Product Data */}
+      {/* STEP 4: Product Data (UPDATED WITH TEXT FIELDS) */}
       {state.step === 4 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -247,86 +318,159 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
 
           <div className="bg-white/5 backdrop-blur-lg p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl">
+            {/* Input Fields (Name, Desc, etc) */}
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Nombre del Producto</label>
               <input 
                 type="text" 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all"
-                placeholder="Ej: Zapatillas Runner X"
+                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
                 value={state.productData.name}
                 onChange={(e) => updateProductData('name', e.target.value)}
               />
             </div>
-
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Descripción del Producto (Contexto)</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Descripción del Producto</label>
               <textarea 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all h-20 resize-none"
-                placeholder="Ej: Bote de creatina negra con letras doradas, textura mate. Ambiente de gimnasio oscuro."
+                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none"
                 value={state.productData.description}
                 onChange={(e) => updateProductData('description', e.target.value)}
               />
             </div>
-
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Beneficio Principal</label>
               <textarea 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all h-24 resize-none"
-                placeholder="Ej: Súper ligeras y transpirables para correr más rápido."
+                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none"
                 value={state.productData.benefit}
                 onChange={(e) => updateProductData('benefit', e.target.value)}
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Público Objetivo (Opcional)</label>
-              <input 
-                type="text" 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all"
-                placeholder={businessSettings.targetAudience ? `Predeterminado: ${businessSettings.targetAudience}` : "Ej: Hombres jóvenes deportistas"}
-                value={state.productData.targetAudience}
-                onChange={(e) => updateProductData('targetAudience', e.target.value)}
-              />
+            {/* NEW FIELDS: DISCOUNT & PRICE/EXTRA TEXT */}
+            <div className="grid grid-cols-2 gap-4 pt-2">
+                <div>
+                   <label className="flex items-center gap-2 text-xs font-bold text-indigo-400 mb-2 uppercase tracking-wide">
+                      <Tag size={12} /> Oferta / Descuento
+                   </label>
+                   <input 
+                    type="text" 
+                    placeholder="Ej: 20% OFF"
+                    className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
+                    value={state.productData.promoDetails || ''}
+                    onChange={(e) => updateProductData('promoDetails', e.target.value)}
+                  />
+                </div>
+                <div>
+                   <label className="flex items-center gap-2 text-xs font-bold text-emerald-400 mb-2 uppercase tracking-wide">
+                      <Type size={12} /> Texto Extra / Precio
+                   </label>
+                   <input 
+                    type="text" 
+                    placeholder="Ej: Solo hoy $19.99"
+                    className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
+                    value={state.productData.price || ''}
+                    onChange={(e) => updateProductData('price', e.target.value)}
+                  />
+                </div>
             </div>
 
+            {/* UPLOAD SECTION: TABS */}
             <div className="pt-2">
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Foto de referencia (Muy Recomendado)</label>
-              <div className="relative group">
-                <input 
-                  type="file" 
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden" 
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload" className="flex items-center justify-center w-full p-8 border border-dashed border-white/10 rounded-2xl bg-slate-900/30 cursor-pointer hover:bg-slate-800/50 hover:border-indigo-500/30 transition-all">
-                  {state.productData.baseImage ? (
-                    <div className="relative w-full h-40 overflow-hidden rounded-xl shadow-lg">
-                      <img src={state.productData.baseImage} alt="Preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="text-white text-xs font-medium bg-black/50 px-3 py-1 rounded-full border border-white/20">Cambiar imagen</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center text-slate-500 group-hover:text-indigo-400 transition-colors">
-                      <div className="bg-white/5 p-4 rounded-full mb-3 group-hover:bg-indigo-500/20 transition-colors">
-                        <Upload size={24} />
-                      </div>
-                      <span className="text-sm font-medium">Subir foto real</span>
-                      <p className="text-[9px] text-slate-500 mt-2 text-center max-w-[200px]">
-                         La IA usará esta foto para mantener tu producto idéntico.
-                      </p>
-                    </div>
-                  )}
-                </label>
+              <label className="block text-xs font-bold text-slate-400 mb-4 uppercase tracking-wide">Foto de referencia</label>
+              
+              <div className="flex bg-slate-900/50 p-1 rounded-xl mb-4 border border-white/5 w-fit">
+                <button 
+                    onClick={() => setUploadMethod('desktop')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'desktop' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                    <Monitor size={14} /> Desktop
+                </button>
+                <button 
+                    onClick={() => initMobileUpload()}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'mobile' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                    <Smartphone size={14} /> Celular / QR
+                </button>
               </div>
-            </div>
 
+              {/* MODE 1: DESKTOP */}
+              {uploadMethod === 'desktop' && (
+                  <div className="relative group animate-in fade-in duration-300">
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden" 
+                      id="file-upload"
+                    />
+                    <label htmlFor="file-upload" className="flex items-center justify-center w-full p-8 border border-dashed border-white/10 rounded-2xl bg-slate-900/30 cursor-pointer hover:bg-slate-800/50 hover:border-indigo-500/30 transition-all">
+                      {state.productData.baseImage ? (
+                        <div className="relative w-full h-40 overflow-hidden rounded-xl shadow-lg">
+                          <img src={state.productData.baseImage} alt="Preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span className="text-white text-xs font-medium bg-black/50 px-3 py-1 rounded-full border border-white/20">Cambiar imagen</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center text-slate-500 group-hover:text-indigo-400 transition-colors">
+                          <div className="bg-white/5 p-4 rounded-full mb-3 group-hover:bg-indigo-500/20 transition-colors">
+                            <Upload size={24} />
+                          </div>
+                          <span className="text-sm font-medium">Subir foto desde PC</span>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+              )}
+
+              {/* MODE 2: QR */}
+              {uploadMethod === 'mobile' && (
+                  <div className="bg-slate-900/50 border border-white/10 rounded-2xl p-6 flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
+                     {state.productData.baseImage ? (
+                         <div className="w-full">
+                            <div className="flex items-center justify-center gap-2 text-emerald-400 mb-4 bg-emerald-500/10 py-2 rounded-lg">
+                                <CheckCircle size={16} /> <span className="text-sm font-bold">¡Imagen recibida!</span>
+                            </div>
+                            <div className="relative w-full h-48 overflow-hidden rounded-xl border border-white/10">
+                                <img src={state.productData.baseImage} className="w-full h-full object-cover" />
+                            </div>
+                            <button onClick={initMobileUpload} className="mt-4 text-xs text-slate-400 underline hover:text-white">Escanear otro código</button>
+                         </div>
+                     ) : (
+                        <>
+                            {qrSessionId ? (
+                                <>
+                                    <div className="bg-white p-4 rounded-xl mb-4 shadow-[0_0_30px_rgba(255,255,255,0.1)]">
+                                        <QRCode 
+                                            value={`${window.location.origin}/?mobile_upload=${qrSessionId}`} 
+                                            size={160}
+                                        />
+                                    </div>
+                                    <h4 className="text-white font-bold mb-1 flex items-center gap-2">
+                                        <Smartphone size={16} className="text-indigo-400" /> Escanea con tu celular
+                                    </h4>
+                                    <p className="text-xs text-slate-400 max-w-[200px]">
+                                        Abre la cámara de tu teléfono y escanea para subir la foto instantáneamente.
+                                    </p>
+                                    <div className="mt-4 flex items-center gap-2 text-[10px] text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full animate-pulse">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
+                                        Esperando conexión...
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="py-10">
+                                    <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto"></div>
+                                </div>
+                            )}
+                        </>
+                     )}
+                  </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* STEP 5: Loading */}
+      {/* STEP 5 & 6 (Loading & Results) - Keep same logic as before */}
       {state.step === 5 && (
         <div className="h-full flex flex-col items-center justify-center text-center space-y-8 animate-in fade-in duration-700 mt-20">
           <div className="relative">
@@ -347,35 +491,25 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
-      {/* STEP 6: Results */}
       {state.step === 6 && result && (
         <div className="space-y-8 pb-20 animate-in slide-in-from-bottom-8 duration-500">
           <div className="text-center mb-8">
              <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">¡Campaña Lista!</h2>
              <p className="text-slate-400">Generado con IA de última generación para {state.platform}</p>
           </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {result.variants.map((variant) => (
-              <VariantCard 
-                key={variant.id} 
-                variant={variant} 
-                onView={onViewImage} 
-                showWatermark={subscription.plan === 'free'} 
-              />
+              <VariantCard key={variant.id} variant={variant} onView={onViewImage} showWatermark={subscription.plan === 'free'} />
             ))}
           </div>
         </div>
       )}
 
-      {/* Footer Nav */}
+      {/* FOOTER */}
       {state.step > 0 && state.step < 5 && (
         <footer className="absolute bottom-0 left-0 right-0 bg-[#020617]/90 backdrop-blur-xl border-t border-white/5 p-6 z-50 animate-in slide-in-from-bottom-4">
           <div className="max-w-2xl mx-auto flex gap-4">
-            <button 
-              onClick={prevStep}
-              className="px-6 py-4 rounded-xl font-bold text-slate-400 bg-white/5 border border-white/5 hover:bg-white/10 hover:text-white transition-all"
-            >
+            <button onClick={prevStep} className="px-6 py-4 rounded-xl font-bold text-slate-400 bg-white/5 border border-white/5 hover:bg-white/10 hover:text-white transition-all">
               <ChevronLeft size={24} />
             </button>
             
@@ -397,7 +531,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                     (state.step === 1 && !state.contentType) || 
                     (state.step === 2 && !state.platform) || 
                     (state.step === 3 && !state.visualStyle) ||
-                    (state.step === 4 && (!state.productData.name || !state.productData.description))
+                    (state.step === 4 && (!state.productData.name || !state.productData.description || (!state.productData.baseImage && !state.productData.description))) // BaseImage is optional but good check
                 }
                 className={`
                     flex-1 rounded-xl font-bold text-white text-lg shadow-lg flex items-center justify-center gap-2 transition-all relative overflow-hidden
@@ -421,10 +555,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
       {state.step === 6 && (
         <footer className="absolute bottom-0 left-0 right-0 bg-[#020617]/90 backdrop-blur-xl border-t border-white/5 p-4 z-50 animate-in slide-in-from-bottom-4">
            <div className="max-w-2xl mx-auto flex justify-center">
-            <button 
-              onClick={resetApp}
-              className="group flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-white hover:bg-white/5 px-4 py-2 rounded-full border border-transparent hover:border-white/10 transition-all duration-300"
-            >
+            <button onClick={resetApp} className="group flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-white hover:bg-white/5 px-4 py-2 rounded-full border border-transparent hover:border-white/10 transition-all duration-300">
               <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" /> 
               <span>Crear Nuevo</span>
             </button>

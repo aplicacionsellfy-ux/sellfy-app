@@ -48,6 +48,7 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
       - Description: ${productData.description}
       - Main Benefit: ${productData.benefit}
       - Offer: ${productData.promoDetails || 'N/A'}
+      - Price/Info: ${productData.price || 'N/A'}
       
       CONTEXT:
       - Platform: ${platform}
@@ -58,6 +59,8 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
       REQUIREMENTS:
       - Use AIDA framework (Attention, Interest, Desire, Action).
       - Add relevant emojis.
+      - If an OFFER is present ("${productData.promoDetails}"), mention it explicitly and urgently.
+      - If PRICE is present ("${productData.price}"), include it naturally.
       - 3-5 high traffic hashtags.
       - Language: Spanish (Native).
       
@@ -92,6 +95,14 @@ const generateWithGeminiImage = async (prompt: string, productData: any, plan: P
         const parts: any[] = [];
         let finalPrompt = "";
 
+        // Text Overlay Logic
+        const textOverlayInstruction = (productData.promoDetails || productData.price) 
+          ? `TEXT RENDERING: Try to include visible text in the scene if natural. 
+             Offer Text: "${productData.promoDetails || ''}" 
+             Price Text: "${productData.price || ''}". 
+             Ensure text is legible and integrated into the ${visualStyle} style.` 
+          : "";
+
         if (productData.baseImage) {
             const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
@@ -112,6 +123,8 @@ const generateWithGeminiImage = async (prompt: string, productData: any, plan: P
                   - Context: ${prompt}.
                   - Lighting: Professional studio lighting matching the product.
                   - Integration: Ensure realistic shadows and reflections on the surface.
+                  
+                  ${textOverlayInstruction}
                 `;
             }
         } else {
@@ -122,6 +135,7 @@ const generateWithGeminiImage = async (prompt: string, productData: any, plan: P
                Style: ${visualStyle}.
                Setting: ${prompt}.
                Lighting: Studio quality, 8k resolution.
+               ${textOverlayInstruction}
              `;
         }
 
