@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, Send, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, Send, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers } from 'lucide-react';
 import { ContentVariant, PlanDetails } from '../types';
 import { useToast } from './ui/Toast';
 import { animateImageWithVeo } from '../services/geminiService';
@@ -233,7 +233,7 @@ export const VariantCard: React.FC<{
       }
       
       setIsAnimating(true);
-      addToast("Creando video con Veo (esto puede tardar ~30s)...", "info");
+      addToast("Generando video con IA (esto puede tardar ~30s)...", "info");
 
       try {
           const videoUrl = await animateImageWithVeo(variant.image);
@@ -245,7 +245,7 @@ export const VariantCard: React.FC<{
           }
       } catch (error) {
           console.error(error);
-          addToast("Error conectando con Veo.", "error");
+          addToast("Error conectando con motor de video.", "error");
       } finally {
           setIsAnimating(false);
       }
@@ -289,7 +289,7 @@ export const VariantCard: React.FC<{
         {isAnimating && (
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-30 flex flex-col items-center justify-center animate-in fade-in">
                 <Loader2 className="animate-spin text-indigo-400 mb-2" size={32} />
-                <span className="text-xs text-white font-bold animate-pulse">Renderizando con Veo...</span>
+                <span className="text-xs text-white font-bold animate-pulse">Renderizando...</span>
             </div>
         )}
 
@@ -306,7 +306,7 @@ export const VariantCard: React.FC<{
                <button 
                   onClick={handleAnimate} 
                   className="p-2.5 rounded-full bg-indigo-600/80 text-white hover:bg-indigo-500 backdrop-blur-md border border-white/10 transition-colors shadow-lg flex items-center gap-2 pr-4"
-                  title="Convertir a Video con Veo"
+                  title="Animar con IA"
                >
                  <VideoIcon size={16} /> <span className="text-[10px] font-bold">Animar</span>
                </button>
@@ -314,15 +314,20 @@ export const VariantCard: React.FC<{
            <button onClick={(e) => { e.stopPropagation(); onView(activeMediaUrl); }} className="p-2.5 rounded-full bg-black/60 text-white hover:bg-indigo-500 hover:text-white backdrop-blur-md border border-white/10 transition-colors shadow-lg"><Maximize2 size={16} /></button>
            <button onClick={handleDownload} className="p-2.5 rounded-full bg-black/60 text-white hover:bg-emerald-500 hover:text-white backdrop-blur-md border border-white/10 transition-colors shadow-lg"><Download size={16} /></button>
         </div>
-
-        <div className="absolute top-3 left-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100 z-20">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-white/90 bg-black/50 backdrop-blur-md px-2.5 py-1 rounded-md border border-white/10 shadow-lg">
-             {variant.angle}
-          </span>
-        </div>
       </div>
 
       <div className="flex-1 p-5 flex flex-col border-t border-white/5 bg-gradient-to-b from-white/[0.02] to-transparent">
+        
+        {/* SUBTLE HEADER FOR ANGLE */}
+        <div className="flex items-center gap-2 mb-3">
+            <div className="p-1 rounded-md bg-white/5 border border-white/5">
+                <Layers size={12} className="text-indigo-400" />
+            </div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                {variant.angle.split(',')[0]}
+            </span>
+        </div>
+
         <div className="flex-1 mb-4 relative">
            <p className="text-sm text-slate-300 font-light leading-relaxed whitespace-pre-wrap line-clamp-4 group-hover:line-clamp-none transition-all duration-300">{variant.copy}</p>
            <div className="flex flex-wrap gap-1.5 mt-3">{variant.hashtags.slice(0, 5).map((tag, i) => (<span key={i} className="text-[10px] text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/10">{tag}</span>))}</div>

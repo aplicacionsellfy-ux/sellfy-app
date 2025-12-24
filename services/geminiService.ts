@@ -1,23 +1,16 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier, ContentType, Platform } from "../types";
 
 // --- CONFIGURATION ---
 const getGeminiKey = () => {
-  // 1. Try standard Vite env var (VITE_API_KEY) - Works in dev and prod if VITE_ prefix used
   // @ts-ignore
   if (import.meta.env?.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
-  
-  // 2. Try direct replacement from vite.config.ts (process.env.API_KEY) - Works for specific Vercel/Cloud configs
   try {
     // @ts-ignore
-    // Vite replaces 'process.env.API_KEY' with the literal string value at build time.
-    // We access it inside try/catch to handle cases where it's NOT replaced and process is undefined (browser).
     const key = process.env.API_KEY;
     if (key) return key;
-  } catch (e) {
-    // ReferenceError: process is not defined
-  }
-  
+  } catch (e) {}
   return "";
 };
 
@@ -25,10 +18,9 @@ const GEMINI_API_KEY = getGeminiKey();
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 if (!GEMINI_API_KEY) {
-    console.warn("⚠️ Gemini Service: No API Key found. AI features will fail.");
+    console.warn("⚠️ IA Service: No API Key found.");
 }
 
-// Helper to sanitize JSON response
 const cleanJsonText = (text: string | undefined): string => {
   if (!text) return '{}';
   return text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -40,9 +32,8 @@ const cleanJsonText = (text: string | undefined): string => {
 const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   const { platform, productData } = state;
   
-  // Default fallback
   const fallback = { 
-    copy: `${productData.name} - ${productData.benefit} 🔥\n\n¡Consíguelo ahora!`, 
+    copy: `${productData.name} - ${productData.benefit} 🔥\n\n${productData.description}\n\n¡Consíguelo ahora!`, 
     hashtags: ["#sellfy", "#viral", "#fyp"] 
   };
 
@@ -51,16 +42,24 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
 
     const prompt = `
       ROLE: Expert Social Media Copywriter.
-      TASK: Write a caption for "${productData.name}".
-      PLATFORM: ${platform}.
-      CONTEXT: ${angleDescription}.
-      TONE: ${settings.tone}.
-      BENEFIT: ${productData.benefit}.
+      TASK: Write a persuasive caption for "${productData.name}".
       
+      PRODUCT INFO:
+      - Description: ${productData.description}
+      - Main Benefit: ${productData.benefit}
+      - Offer: ${productData.promoDetails || 'N/A'}
+      
+      CONTEXT:
+      - Platform: ${platform}
+      - Visual Angle: ${angleDescription}
+      - Tone: ${settings.tone}
+      - Audience: ${productData.targetAudience || settings.targetAudience}
+
       REQUIREMENTS:
-      - Use AIDA framework.
-      - Add emojis.
-      - 3-5 hashtags.
+      - Use AIDA framework (Attention, Interest, Desire, Action).
+      - Add relevant emojis.
+      - 3-5 high traffic hashtags.
+      - Language: Spanish (Native).
       
       OUTPUT JSON: { "copy": "string", "hashtags": ["string"] }
     `;
@@ -82,30 +81,56 @@ const generateVariantCopy = async (state: WizardState, settings: BusinessSetting
   }
 };
 
-// 2. Image Generator (Adaptive Model Selection)
-const generateWithGeminiImage = async (prompt: string, productData: any, plan: PlanTier): Promise<string | null> => {
+// 2. Image Generator (High Fidelity Logic)
+const generateWithGeminiImage = async (prompt: string, productData: any, plan: PlanTier, visualStyle: string): Promise<string | null> => {
     try {
-        if (!ai) throw new Error("No Gemini Key");
+        if (!ai) throw new Error("No AI Key");
         
-        // Use Pro model only for 'pro' plan, otherwise standard flash model
         const isPro = plan === 'pro';
         const model = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
         
         const parts: any[] = [];
+        let finalPrompt = "";
+
         if (productData.baseImage) {
             const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
                 parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
+                
+                // CRITICAL PROMPT FOR FIDELITY
+                finalPrompt = `
+                  ROLE: Professional Product Photographer & Retoucher.
+                  TASK: Background Replacement & Environment Compositing.
+                  
+                  STRICT CONSTRAINT: 
+                  - KEEP THE PRODUCT (Subject) EXACTLY AS IT IS in the input image. 
+                  - DO NOT change the product logo, text, shape, or color.
+                  - Only improve lighting and resolution of the product (Upscaling).
+                  
+                  NEW ENVIRONMENT:
+                  - Create a ${visualStyle} background.
+                  - Context: ${prompt}.
+                  - Lighting: Professional studio lighting matching the product.
+                  - Integration: Ensure realistic shadows and reflections on the surface.
+                `;
             }
+        } else {
+             // Generative Fallback if no image provided
+             finalPrompt = `
+               Professional commercial photography of ${productData.name}.
+               Description: ${productData.description}.
+               Style: ${visualStyle}.
+               Setting: ${prompt}.
+               Lighting: Studio quality, 8k resolution.
+             `;
         }
-        parts.push({ text: prompt });
 
-        console.log(`🎨 Generating image with ${model}...`);
+        console.log(`🎨 Generando imagen con IA...`);
+        parts.push({ text: finalPrompt });
         
         const response = await ai.models.generateContent({
             model: model,
             contents: { parts },
-            // Only send imageConfig for the Pro model which supports it
             config: isPro ? { imageConfig: { imageSize: '1K', aspectRatio: '1:1' } } : {}
         });
 
@@ -113,23 +138,20 @@ const generateWithGeminiImage = async (prompt: string, productData: any, plan: P
             if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
         }
     } catch (e: any) {
-        console.error("Gemini Image Gen Error:", e.message || e);
-        
-        // If Pro model fails (e.g. 403, 404, or not enabled), fallback to Flash
+        console.error("AI Gen Error:", e.message || e);
         if (plan === 'pro') {
-            console.log("🔄 Retrying with Flash model...");
-            return generateWithGeminiImage(prompt, productData, 'free');
+            return generateWithGeminiImage(prompt, productData, 'free', visualStyle);
         }
     }
     return null;
 };
 
-// 3. Video Generator (Veo)
+// 3. Video Generator
 const generateWithVeoText = async (prompt: string): Promise<string | null> => {
     try {
-        if (!ai) throw new Error("No Gemini Key");
+        if (!ai) throw new Error("No AI Key");
         
-        console.log("🎥 Generating video with Veo...");
+        console.log("🎥 Generando video...");
         let operation = await ai.models.generateVideos({
             model: 'veo-3.1-fast-generate-preview', 
             prompt: prompt,
@@ -140,7 +162,6 @@ const generateWithVeoText = async (prompt: string): Promise<string | null> => {
             }
         });
 
-        // Poll for completion
         while (!operation.done) {
             await new Promise(resolve => setTimeout(resolve, 3000));
             // @ts-ignore
@@ -149,25 +170,24 @@ const generateWithVeoText = async (prompt: string): Promise<string | null> => {
         
         // @ts-ignore
         const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-        // Append API Key for secure access to the video resource
         return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
     } catch (e) { 
-        console.error("Veo Error:", e);
+        console.error("Video Gen Error:", e);
         return null; 
     }
 };
 
-// 4. Image-to-Video Animator
+// 4. Image Animation
 export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
     try {
-        if (!ai) throw new Error("No Gemini Key");
+        if (!ai) throw new Error("No AI Key");
 
         const matches = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
-        if (!matches) throw new Error("Invalid image format");
+        if (!matches) throw new Error("Invalid format");
 
         let operation = await ai.models.generateVideos({
             model: 'veo-3.1-fast-generate-preview', 
-            prompt: "Cinematic slow motion movement, high quality.",
+            prompt: "Slow motion cinematic camera movement, enhance lighting, keep product static and sharp.",
             image: {
                 imageBytes: matches[2],
                 mimeType: matches[1]
@@ -202,32 +222,28 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
     
     const isVideoRequest = contentType === ContentType.VIDEO_REEL || platform === Platform.TIKTOK || platform === Platform.IG_REELS;
 
-    const promptText = `
-      Product: "${productData.name}" - ${productData.benefit}.
-      Style: ${visualStyle}.
+    // Richer prompt construction for background context
+    const promptContext = `
       Composition: ${angle}.
-      Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
-      Vibe: ${settings.tone}.
+      Product Context: ${productData.description}.
+      Platform Aesthetic: ${platform}.
+      Brand Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
     `;
 
     let mediaUrl: string | null = null;
     let isVideoResult = false;
 
-    // 1. Generate Media
     if (isVideoRequest) {
-        mediaUrl = await generateWithVeoText(`${promptText}. Cinematic lighting.`);
+        mediaUrl = await generateWithVeoText(`Cinematic video of ${productData.name} in a ${visualStyle} environment. ${promptContext}`);
         isVideoResult = true;
     } else {
-        mediaUrl = await generateWithGeminiImage(promptText, productData, plan);
+        mediaUrl = await generateWithGeminiImage(promptContext, productData, plan, visualStyle || 'Studio');
     }
 
-    // 2. Fallback Media
     if (!mediaUrl) {
-         // Fallback to placeholder if AI fails
          mediaUrl = `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name || "Error")}`;
     }
 
-    // 3. Generate Copy
     const textData = await generateVariantCopy(state, settings, angle);
 
     return {
@@ -243,18 +259,16 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
 export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const isVideo = state.contentType === ContentType.VIDEO_REEL || state.platform === Platform.TIKTOK || state.platform === Platform.IG_REELS;
   
-  const angles = isVideo ? ["Dynamic Reveal", "Lifestyle Use", "Cinematic Atmosphere", "Creative Details"] 
-                         : ["Studio Hero Shot", "Lifestyle Context", "Creative Composition", "Detail Focus"];
+  const angles = isVideo ? ["Dynamic Reveal", "Lifestyle Usage", "Cinematic Mood", "Product Details"] 
+                         : ["Hero Shot (Centered)", "Lifestyle Context", "Creative Angle", "Close-up Detail"];
 
-  console.log(`🚀 Starting campaign gen. Plan: ${plan}`);
+  console.log(`🚀 Iniciando campaña...`);
 
   const variants: ContentVariant[] = [];
   
-  // Generate variants sequentially to avoid rate limits
   for (let i = 0; i < angles.length; i++) {
       const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);
-      // Small delay between requests
       if (i < angles.length - 1) await new Promise(r => setTimeout(r, 500));
   }
 

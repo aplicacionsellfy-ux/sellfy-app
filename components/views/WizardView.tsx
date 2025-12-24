@@ -33,6 +33,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
     visualStyle: null,
     productData: {
       name: '',
+      description: '', // Init description
       benefit: '',
       targetAudience: '',
       price: '',
@@ -69,7 +70,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
       const reader = new FileReader();
       reader.onloadend = () => {
         updateProductData('baseImage', reader.result as string);
-        addToast("Imagen cargada. Gemini Vision mantendrá la fidelidad de tu producto.", "success");
+        addToast("Imagen cargada. Nuestra IA mantendrá la fidelidad de tu producto.", "success");
       };
       reader.readAsDataURL(file);
     }
@@ -77,7 +78,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   const handleGenerate = async () => {
     if (apiKeyMissing) {
-        addToast("Error: Falta la API Key de Gemini", "error");
+        addToast("Error: Configuración de API incompleta", "error");
         return;
     }
 
@@ -123,12 +124,12 @@ export const WizardView: React.FC<WizardViewProps> = ({
           <h1 className="text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-indigo-100 to-indigo-300 mb-2 tracking-tighter">sellfy</h1>
           <p className="text-xs uppercase tracking-[0.3em] text-indigo-400 font-bold mb-6">Crea, publica, vende</p>
           <p className="text-lg text-slate-400 mb-10 leading-relaxed font-light">
-             Powered by <span className="text-indigo-400 font-semibold">Gemini 3 Pro & Google Veo</span> para máxima fidelidad.
+             Powered by <span className="text-indigo-400 font-semibold">Sellfy AI</span> para máxima fidelidad visual.
           </p>
           
           {apiKeyMissing ? (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm mb-4 backdrop-blur-sm">
-              Error crítico: Falta la API KEY de Gemini en el entorno.
+              Error crítico: Falta la API KEY en el entorno.
             </div>
           ) : (
              <div className="space-y-4 w-full">
@@ -242,7 +243,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-white tracking-tight mb-2">Detalles del Producto</h2>
-            <p className="text-slate-500">Gemini Vision analizará esto para máxima fidelidad</p>
+            <p className="text-slate-500">Nuestra IA de Visión analizará esto para máxima fidelidad</p>
           </div>
 
           <div className="bg-white/5 backdrop-blur-lg p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl">
@@ -258,9 +259,19 @@ export const WizardView: React.FC<WizardViewProps> = ({
             </div>
 
             <div>
+              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Descripción del Producto (Contexto)</label>
+              <textarea 
+                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all h-20 resize-none"
+                placeholder="Ej: Bote de creatina negra con letras doradas, textura mate. Ambiente de gimnasio oscuro."
+                value={state.productData.description}
+                onChange={(e) => updateProductData('description', e.target.value)}
+              />
+            </div>
+
+            <div>
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Beneficio Principal</label>
               <textarea 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all h-28 resize-none"
+                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all h-24 resize-none"
                 placeholder="Ej: Súper ligeras y transpirables para correr más rápido."
                 value={state.productData.benefit}
                 onChange={(e) => updateProductData('benefit', e.target.value)}
@@ -303,7 +314,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                       </div>
                       <span className="text-sm font-medium">Subir foto real</span>
                       <p className="text-[9px] text-slate-500 mt-2 text-center max-w-[200px]">
-                         Gemini Vision usará esta foto para mantener tu producto idéntico.
+                         La IA usará esta foto para mantener tu producto idéntico.
                       </p>
                     </div>
                   )}
@@ -326,7 +337,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
           <div>
             <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Creando Magia</h2>
             <p className="text-slate-500 text-lg font-light">
-              {isVideo ? "Gemini y Veo están renderizando tu video..." : "Gemini Vision está diseñando tus imágenes..."}
+              {isVideo ? "Nuestro motor de video está renderizando..." : "Diseñando imágenes de alta fidelidad..."}
               <br/>
               <span className="text-xs text-indigo-400 mt-2 block">
                  Costo: {currentCost} créditos
@@ -386,11 +397,11 @@ export const WizardView: React.FC<WizardViewProps> = ({
                     (state.step === 1 && !state.contentType) || 
                     (state.step === 2 && !state.platform) || 
                     (state.step === 3 && !state.visualStyle) ||
-                    (state.step === 4 && !state.productData.name)
+                    (state.step === 4 && (!state.productData.name || !state.productData.description))
                 }
                 className={`
                     flex-1 rounded-xl font-bold text-white text-lg shadow-lg flex items-center justify-center gap-2 transition-all relative overflow-hidden
-                    ${((state.step === 1 && !state.contentType) || (state.step === 4 && !state.productData.name)) 
+                    ${((state.step === 1 && !state.contentType) || (state.step === 4 && (!state.productData.name || !state.productData.description))) 
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5' 
                     : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_0_25px_rgba(79,70,229,0.3)] hover:scale-[1.01]'}
                 `}

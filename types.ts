@@ -59,6 +59,7 @@ export interface UserSubscription {
 
 export interface ProductData {
   name: string;
+  description: string; // Nuevo campo
   benefit: string;
   price?: string;
   promoDetails?: string;
