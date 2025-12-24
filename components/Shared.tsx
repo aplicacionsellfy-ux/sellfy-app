@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, Send, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers, RefreshCw, Share2 } from 'lucide-react';
 import { ContentVariant, PlanDetails } from '../types';
 import { useToast } from './ui/Toast';
-import { animateImageWithVeo } from '../services/geminiService';
+import { animateImageWithVeo, regenerateCopyOnly } from '../services/geminiService';
 
 // Full Screen Image/Video Modal
 export const FullScreenModal: React.FC<{ 
@@ -187,6 +187,10 @@ export const VariantCard: React.FC<{
   
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
+  
+  // State for Copy Regeneration
+  const [currentCopy, setCurrentCopy] = useState(variant.copy);
+  const [isRegeneratingText, setIsRegeneratingText] = useState(false);
 
   const activeMediaUrl = localVideoUrl || variant.image;
   const isVideo = activeMediaUrl.endsWith('.mp4') || activeMediaUrl.includes('video') || variant.isVideo || !!localVideoUrl;
@@ -213,14 +217,63 @@ export const VariantCard: React.FC<{
 
   const handleCopyText = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(`${variant.copy}\n\n${variant.hashtags.join(' ')}`);
+    navigator.clipboard.writeText(`${currentCopy}\n\n${variant.hashtags.join(' ')}`);
     addToast("Copy copiado", "success");
   };
 
-  const handlePublish = (e: React.MouseEvent) => {
+  const handleRegenerateText = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    addToast("Conectando con plataforma...", "info");
-    setTimeout(() => { addToast("¡Publicado exitosamente! 🚀", "success"); }, 1500);
+    if (isRegeneratingText) return;
+
+    setIsRegeneratingText(true);
+    try {
+        const newText = await regenerateCopyOnly("Producto", "Social Media", "Professional");
+        if (newText) setCurrentCopy(newText);
+        addToast("Texto regenerado", "success");
+    } catch {
+        addToast("Error regenerando texto", "error");
+    } finally {
+        setIsRegeneratingText(false);
+    }
+  };
+
+  const handlePublish = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const fullText = `${currentCopy}\n\n${variant.hashtags.join(' ')}`;
+    
+    // Check if Web Share API is available (Mobile Native Share)
+    if (navigator.share) {
+        try {
+            // Convert base64 image to file for sharing if possible
+            let fileArray: File[] = [];
+            if (!isVideo && activeMediaUrl.startsWith('data:')) {
+                const res = await fetch(activeMediaUrl);
+                const blob = await res.blob();
+                const file = new File([blob], 'image.png', { type: 'image/png' });
+                fileArray = [file];
+            }
+
+            await navigator.share({
+                title: 'Nuevo Post - Sellfy',
+                text: fullText,
+                files: fileArray.length > 0 ? fileArray : undefined,
+                url: isVideo ? activeMediaUrl : undefined 
+            });
+            addToast("Compartido exitosamente", "success");
+        } catch (err) {
+            console.error(err);
+             // Fallback if sharing fails or cancelled
+             addToast("Copiado al portapapeles", "info");
+             navigator.clipboard.writeText(fullText);
+        }
+    } else {
+        // Desktop Fallback: Simulation
+        addToast("Abriendo plataforma...", "info");
+        navigator.clipboard.writeText(fullText);
+        setTimeout(() => { 
+            window.open('https://instagram.com', '_blank');
+        }, 1000);
+    }
   };
 
   const handleAnimate = async (e: React.MouseEvent) => {
@@ -233,7 +286,7 @@ export const VariantCard: React.FC<{
       }
       
       setIsAnimating(true);
-      addToast("Generando video con IA (esto puede tardar ~30s)...", "info");
+      addToast("Generando video (~60s)... La paciencia premia 🍿", "info");
 
       try {
           const videoUrl = await animateImageWithVeo(variant.image);
@@ -241,7 +294,7 @@ export const VariantCard: React.FC<{
               setLocalVideoUrl(videoUrl);
               addToast("¡Video generado con éxito!", "success");
           } else {
-              addToast("No se pudo generar el video. Intenta luego.", "error");
+              addToast("No se pudo generar el video. Revisa la consola.", "error");
           }
       } catch (error) {
           console.error(error);
@@ -289,7 +342,7 @@ export const VariantCard: React.FC<{
         {isAnimating && (
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-30 flex flex-col items-center justify-center animate-in fade-in">
                 <Loader2 className="animate-spin text-indigo-400 mb-2" size={32} />
-                <span className="text-xs text-white font-bold animate-pulse">Renderizando...</span>
+                <span className="text-xs text-white font-bold animate-pulse">Renderizando (~1 min)...</span>
             </div>
         )}
 
@@ -319,22 +372,42 @@ export const VariantCard: React.FC<{
       <div className="flex-1 p-5 flex flex-col border-t border-white/5 bg-gradient-to-b from-white/[0.02] to-transparent">
         
         {/* SUBTLE HEADER FOR ANGLE */}
-        <div className="flex items-center gap-2 mb-3">
-            <div className="p-1 rounded-md bg-white/5 border border-white/5">
-                <Layers size={12} className="text-indigo-400" />
+        <div className="flex items-center gap-2 mb-3 justify-between">
+            <div className="flex items-center gap-2">
+                <div className="p-1 rounded-md bg-white/5 border border-white/5">
+                    <Layers size={12} className="text-indigo-400" />
+                </div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {variant.angle.split(',')[0]}
+                </span>
             </div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                {variant.angle.split(',')[0]}
-            </span>
+            
+            {/* REGENERATE TEXT BUTTON */}
+            <button 
+                onClick={handleRegenerateText}
+                disabled={isRegeneratingText}
+                className="text-slate-500 hover:text-indigo-400 transition-colors"
+                title="Reescribir Texto"
+            >
+                <RefreshCw size={14} className={isRegeneratingText ? "animate-spin" : ""} />
+            </button>
         </div>
 
         <div className="flex-1 mb-4 relative">
-           <p className="text-sm text-slate-300 font-light leading-relaxed whitespace-pre-wrap line-clamp-4 group-hover:line-clamp-none transition-all duration-300">{variant.copy}</p>
+           <p className={`text-sm text-slate-300 font-light leading-relaxed whitespace-pre-wrap ${isRegeneratingText ? 'opacity-50 blur-sm' : ''} transition-all duration-300`}>
+             {currentCopy}
+           </p>
            <div className="flex flex-wrap gap-1.5 mt-3">{variant.hashtags.slice(0, 5).map((tag, i) => (<span key={i} className="text-[10px] text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/10">{tag}</span>))}</div>
         </div>
 
         <button onClick={handleCopyText} className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-xs font-bold uppercase tracking-wide border border-white/5 transition-all flex items-center justify-center gap-2 group/btn mb-3"><Copy size={14} className="group-hover/btn:scale-110 transition-transform" /> Copiar Texto</button>
-        <button onClick={handlePublish} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wide shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 transition-all flex items-center justify-center gap-2 group/pub transform active:scale-95"><Send size={14} className="group-hover/pub:translate-x-0.5 group-hover/pub:-translate-y-0.5 transition-transform" /> Publicar</button>
+        
+        <button 
+           onClick={handlePublish}
+           className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wide shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 transition-all flex items-center justify-center gap-2 group/pub transform active:scale-95"
+         >
+           <Share2 size={14} className="group-hover/pub:translate-x-0.5 group-hover/pub:-translate-y-0.5 transition-transform" /> Publicar
+         </button>
       </div>
     </div>
   );

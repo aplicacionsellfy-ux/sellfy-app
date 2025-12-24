@@ -13,7 +13,6 @@ interface WizardViewProps {
   businessSettings: BusinessSettings;
   onCampaignCreated: (campaign: CampaignResult) => void;
   onViewImage: (img: string) => void;
-  apiKeyMissing: boolean;
   subscription: UserSubscription;
   onDecrementCredit: (amount: number) => void;
 }
@@ -22,7 +21,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
   businessSettings, 
   onCampaignCreated, 
   onViewImage, 
-  apiKeyMissing,
   subscription,
   onDecrementCredit
 }) => {
@@ -45,7 +43,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   const [result, setResult] = useState<CampaignResult | null>(null);
   
-  // Mobile Upload State
   const [uploadMethod, setUploadMethod] = useState<'desktop' | 'mobile'>('desktop');
   const [qrSessionId, setQrSessionId] = useState<string | null>(null);
 
@@ -56,7 +53,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   const currentCost = isVideo ? CREDIT_COSTS.VIDEO : CREDIT_COSTS.IMAGE;
 
-  // Cleanup Subscription on Unmount or Step Change
   useEffect(() => {
     return () => {
       if (qrSessionId) {
@@ -91,13 +87,11 @@ export const WizardView: React.FC<WizardViewProps> = ({
     }
   };
 
-  // --- MOBILE UPLOAD LOGIC ---
   const initMobileUpload = async () => {
     setUploadMethod('mobile');
-    if (qrSessionId) return; // Ya existe sesión
+    if (qrSessionId) return; 
 
     try {
-        // 1. Crear sesión en DB
         const { data, error } = await supabase
             .from('upload_sessions')
             .insert({})
@@ -109,7 +103,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
         const newSessionId = data.id;
         setQrSessionId(newSessionId);
 
-        // 2. Escuchar cambios en Realtime
         supabase.channel(`upload-${newSessionId}`)
             .on(
                 'postgres_changes',
@@ -117,8 +110,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
                 async (payload) => {
                     if (payload.new.status === 'completed' && payload.new.image_url) {
                         addToast("¡Imagen recibida del celular!", "success");
-                        
-                        // Descargar y convertir a Base64 para mantener consistencia con el flujo actual
                         try {
                             const res = await fetch(payload.new.image_url);
                             const blob = await res.blob();
@@ -144,11 +135,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
   };
 
   const handleGenerate = async () => {
-    if (apiKeyMissing) {
-        addToast("Error: Configuración de API incompleta", "error");
-        return;
-    }
-
     if (subscription.credits < currentCost) {
         addToast(`Necesitas ${currentCost} créditos. Tienes ${subscription.credits}.`, "error");
         return;
@@ -160,7 +146,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
       const generated = await generateCampaign(state, businessSettings, subscription.plan);
       setResult(generated);
       onCampaignCreated(generated); 
-      onDecrementCredit(currentCost); // Enviamos el costo calculado (1 o 5)
+      onDecrementCredit(currentCost); 
       setState(prev => ({ ...prev, step: 6 })); 
       addToast("¡Contenido generado!", "success");
     } catch (e) {
@@ -176,14 +162,13 @@ export const WizardView: React.FC<WizardViewProps> = ({
       contentType: null,
       platform: null,
       visualStyle: null,
-      productData: { ...state.productData, baseImage: undefined } // Reset image
+      productData: { ...state.productData, baseImage: undefined } 
     });
     setResult(null);
     setQrSessionId(null);
     setUploadMethod('desktop');
   };
 
-  // --- RENDER ---
   if (state.step === 0) {
      return (
       <div className="min-h-screen flex flex-col relative overflow-hidden bg-[#020617]">
@@ -197,21 +182,15 @@ export const WizardView: React.FC<WizardViewProps> = ({
              Powered by <span className="text-indigo-400 font-semibold">Sellfy AI</span> para máxima fidelidad visual.
           </p>
           
-          {apiKeyMissing ? (
-            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm mb-4 backdrop-blur-sm">
-              Error crítico: Falta la API KEY en el entorno.
-            </div>
-          ) : (
-             <div className="space-y-4 w-full">
-                <button 
-                  onClick={nextStep}
-                  className="group w-full relative bg-indigo-600 hover:bg-indigo-500 text-white text-lg font-semibold py-4 px-8 rounded-2xl shadow-[0_0_20px_rgba(79,70,229,0.4)] transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 overflow-hidden"
-                >
-                  <span className="relative z-10 flex items-center gap-2">Comenzar Ahora <ChevronRight size={20} /></span>
-                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-                </button>
-             </div>
-          )}
+          <div className="space-y-4 w-full">
+            <button 
+                onClick={nextStep}
+                className="group w-full relative bg-indigo-600 hover:bg-indigo-500 text-white text-lg font-semibold py-4 px-8 rounded-2xl shadow-[0_0_20px_rgba(79,70,229,0.4)] transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 overflow-hidden"
+            >
+                <span className="relative z-10 flex items-center gap-2">Comenzar Ahora <ChevronRight size={20} /></span>
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -219,7 +198,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   return (
     <div className={`max-w-2xl mx-auto pt-6 pb-32 ${state.step === 6 ? 'max-w-[1400px]' : ''}`}>
-      {/* Progress Bar */}
       {state.step > 0 && state.step < 6 && (
           <div className="w-full mb-10 shrink-0 relative z-40">
             <div className="h-1.5 bg-white/5 w-full rounded-full overflow-hidden border border-white/5 backdrop-blur-sm">
@@ -231,81 +209,28 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
       )}
 
+      {/* Steps 1-3 ... (Same as before, abbreviated for clarity) */}
       {state.step === 1 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-white tracking-tight mb-2">¿Qué vamos a crear?</h2>
-            <p className="text-slate-500">Selecciona el tipo de contenido para hoy</p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {CONTENT_OPTIONS.map((opt) => (
-              <SelectionCard
-                key={opt.id}
-                title={opt.label}
-                description={opt.desc}
-                icon={opt.icon}
-                selected={state.contentType === opt.id}
-                onClick={() => setState(prev => ({ ...prev, contentType: opt.id as ContentType }))}
-              />
-            ))}
-          </div>
+          <div className="mb-8"><h2 className="text-3xl font-bold text-white tracking-tight mb-2">¿Qué vamos a crear?</h2><p className="text-slate-500">Selecciona el tipo de contenido para hoy</p></div>
+          <div className="grid grid-cols-2 gap-4">{CONTENT_OPTIONS.map((opt) => (<SelectionCard key={opt.id} title={opt.label} description={opt.desc} icon={opt.icon} selected={state.contentType === opt.id} onClick={() => setState(prev => ({ ...prev, contentType: opt.id as ContentType }))}/>))}</div>
         </div>
       )}
 
       {state.step === 2 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-white tracking-tight mb-2">¿Dónde publicarás?</h2>
-            <p className="text-slate-500">Optimizaremos la relación de aspecto</p>
-          </div>
-          <div className="space-y-3">
-            {PLATFORM_OPTIONS.map((opt) => (
-              <div 
-                key={opt.id}
-                onClick={() => setState(prev => ({ ...prev, platform: opt.id as Platform }))}
-                className={`
-                  group flex items-center p-5 rounded-2xl border cursor-pointer transition-all duration-300
-                  ${state.platform === opt.id 
-                    ? 'border-indigo-500/50 bg-indigo-500/10 shadow-[0_0_20px_-5px_rgba(99,102,241,0.25)]' 
-                    : 'border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10'}
-                `}
-              >
-                <div className={`p-3 rounded-xl mr-5 transition-colors ${state.platform === opt.id ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-400 group-hover:text-white'}`}>
-                  <opt.icon size={24} />
-                </div>
-                <div className="flex-1">
-                  <h3 className={`font-semibold text-base ${state.platform === opt.id ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>{opt.label}</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p>
-                </div>
-                {state.platform === opt.id && <CheckCircle className="text-indigo-400 drop-shadow-[0_0_5px_rgba(129,140,248,0.5)]" size={24} />}
-              </div>
-            ))}
-          </div>
+          <div className="mb-8"><h2 className="text-3xl font-bold text-white tracking-tight mb-2">¿Dónde publicarás?</h2><p className="text-slate-500">Optimizaremos la relación de aspecto</p></div>
+          <div className="space-y-3">{PLATFORM_OPTIONS.map((opt) => (<div key={opt.id} onClick={() => setState(prev => ({ ...prev, platform: opt.id as Platform }))} className={`group flex items-center p-5 rounded-2xl border cursor-pointer transition-all duration-300 ${state.platform === opt.id ? 'border-indigo-500/50 bg-indigo-500/10 shadow-[0_0_20px_-5px_rgba(99,102,241,0.25)]' : 'border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10'}`}><div className={`p-3 rounded-xl mr-5 transition-colors ${state.platform === opt.id ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-400 group-hover:text-white'}`}><opt.icon size={24} /></div><div className="flex-1"><h3 className={`font-semibold text-base ${state.platform === opt.id ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>{opt.label}</h3><p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p></div>{state.platform === opt.id && <CheckCircle className="text-indigo-400 drop-shadow-[0_0_5px_rgba(129,140,248,0.5)]" size={24} />}</div>))}</div>
         </div>
       )}
 
       {state.step === 3 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-white tracking-tight mb-2">Elige el estilo visual</h2>
-            <p className="text-slate-500">Define la personalidad de la imagen</p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {STYLE_OPTIONS.map((opt) => (
-              <SelectionCard
-                key={opt.id}
-                title={opt.label}
-                icon={opt.icon}
-                selected={state.visualStyle === opt.id}
-                onClick={() => setState(prev => ({ ...prev, visualStyle: opt.id as VisualStyle }))}
-                extraClass={opt.color}
-              />
-            ))}
-          </div>
+          <div className="mb-8"><h2 className="text-3xl font-bold text-white tracking-tight mb-2">Elige el estilo visual</h2><p className="text-slate-500">Define la personalidad de la imagen</p></div>
+          <div className="grid grid-cols-2 gap-4">{STYLE_OPTIONS.map((opt) => (<SelectionCard key={opt.id} title={opt.label} icon={opt.icon} selected={state.visualStyle === opt.id} onClick={() => setState(prev => ({ ...prev, visualStyle: opt.id as VisualStyle }))} extraClass={opt.color}/>))}</div>
         </div>
       )}
 
-      {/* STEP 4: Product Data (UPDATED WITH TEXT FIELDS) */}
       {state.step === 4 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -314,150 +239,49 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
 
           <div className="bg-white/5 backdrop-blur-lg p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl">
-            {/* Input Fields (Name, Desc, etc) */}
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Nombre del Producto</label>
-              <input 
-                type="text" 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
-                value={state.productData.name}
-                onChange={(e) => updateProductData('name', e.target.value)}
-              />
+              <input type="text" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" value={state.productData.name} onChange={(e) => updateProductData('name', e.target.value)} />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Descripción del Producto</label>
-              <textarea 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none"
-                value={state.productData.description}
-                onChange={(e) => updateProductData('description', e.target.value)}
-              />
+              <textarea className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none" value={state.productData.description} onChange={(e) => updateProductData('description', e.target.value)} />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Beneficio Principal</label>
-              <textarea 
-                className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none"
-                value={state.productData.benefit}
-                onChange={(e) => updateProductData('benefit', e.target.value)}
-              />
+              <textarea className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none" value={state.productData.benefit} onChange={(e) => updateProductData('benefit', e.target.value)} />
             </div>
-
-            {/* NEW FIELDS: DISCOUNT & PRICE/EXTRA TEXT */}
             <div className="grid grid-cols-2 gap-4 pt-2">
-                <div>
-                   <label className="flex items-center gap-2 text-xs font-bold text-indigo-400 mb-2 uppercase tracking-wide">
-                      <Tag size={12} /> Oferta / Descuento
-                   </label>
-                   <input 
-                    type="text" 
-                    placeholder="Ej: 20% OFF"
-                    className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
-                    value={state.productData.promoDetails || ''}
-                    onChange={(e) => updateProductData('promoDetails', e.target.value)}
-                  />
-                </div>
-                <div>
-                   <label className="flex items-center gap-2 text-xs font-bold text-emerald-400 mb-2 uppercase tracking-wide">
-                      <Type size={12} /> Texto Extra / Precio
-                   </label>
-                   <input 
-                    type="text" 
-                    placeholder="Ej: Solo hoy $19.99"
-                    className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
-                    value={state.productData.price || ''}
-                    onChange={(e) => updateProductData('price', e.target.value)}
-                  />
-                </div>
+                <div><label className="flex items-center gap-2 text-xs font-bold text-indigo-400 mb-2 uppercase tracking-wide"><Tag size={12} /> Oferta / Descuento</label><input type="text" placeholder="Ej: 20% OFF" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" value={state.productData.promoDetails || ''} onChange={(e) => updateProductData('promoDetails', e.target.value)} /></div>
+                <div><label className="flex items-center gap-2 text-xs font-bold text-emerald-400 mb-2 uppercase tracking-wide"><Type size={12} /> Texto Extra / Precio</label><input type="text" placeholder="Ej: Solo hoy $19.99" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all" value={state.productData.price || ''} onChange={(e) => updateProductData('price', e.target.value)} /></div>
             </div>
 
-            {/* UPLOAD SECTION: TABS */}
             <div className="pt-2">
               <label className="block text-xs font-bold text-slate-400 mb-4 uppercase tracking-wide">Foto de referencia</label>
-              
               <div className="flex bg-slate-900/50 p-1 rounded-xl mb-4 border border-white/5 w-fit">
-                <button 
-                    onClick={() => setUploadMethod('desktop')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'desktop' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-                >
-                    <Monitor size={14} /> Desktop
-                </button>
-                <button 
-                    onClick={() => initMobileUpload()}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'mobile' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-                >
-                    <Smartphone size={14} /> Celular / QR
-                </button>
+                <button onClick={() => setUploadMethod('desktop')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'desktop' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}><Monitor size={14} /> Desktop</button>
+                <button onClick={() => initMobileUpload()} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'mobile' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}><Smartphone size={14} /> Celular / QR</button>
               </div>
 
-              {/* MODE 1: DESKTOP */}
               {uploadMethod === 'desktop' && (
                   <div className="relative group animate-in fade-in duration-300">
-                    <input 
-                      type="file" 
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="hidden" 
-                      id="file-upload"
-                    />
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" id="file-upload"/>
                     <label htmlFor="file-upload" className="flex items-center justify-center w-full p-8 border border-dashed border-white/10 rounded-2xl bg-slate-900/30 cursor-pointer hover:bg-slate-800/50 hover:border-indigo-500/30 transition-all">
                       {state.productData.baseImage ? (
-                        <div className="relative w-full h-40 overflow-hidden rounded-xl shadow-lg">
-                          <img src={state.productData.baseImage} alt="Preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity">
-                            <span className="text-white text-xs font-medium bg-black/50 px-3 py-1 rounded-full border border-white/20">Cambiar imagen</span>
-                          </div>
-                        </div>
+                        <div className="relative w-full h-40 overflow-hidden rounded-xl shadow-lg"><img src={state.productData.baseImage} alt="Preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" /><div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity"><span className="text-white text-xs font-medium bg-black/50 px-3 py-1 rounded-full border border-white/20">Cambiar imagen</span></div></div>
                       ) : (
-                        <div className="flex flex-col items-center text-slate-500 group-hover:text-indigo-400 transition-colors">
-                          <div className="bg-white/5 p-4 rounded-full mb-3 group-hover:bg-indigo-500/20 transition-colors">
-                            <Upload size={24} />
-                          </div>
-                          <span className="text-sm font-medium">Subir foto desde PC</span>
-                        </div>
+                        <div className="flex flex-col items-center text-slate-500 group-hover:text-indigo-400 transition-colors"><div className="bg-white/5 p-4 rounded-full mb-3 group-hover:bg-indigo-500/20 transition-colors"><Upload size={24} /></div><span className="text-sm font-medium">Subir foto desde PC</span></div>
                       )}
                     </label>
                   </div>
               )}
 
-              {/* MODE 2: QR */}
               {uploadMethod === 'mobile' && (
                   <div className="bg-slate-900/50 border border-white/10 rounded-2xl p-6 flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
                      {state.productData.baseImage ? (
-                         <div className="w-full">
-                            <div className="flex items-center justify-center gap-2 text-emerald-400 mb-4 bg-emerald-500/10 py-2 rounded-lg">
-                                <CheckCircle size={16} /> <span className="text-sm font-bold">¡Imagen recibida!</span>
-                            </div>
-                            <div className="relative w-full h-48 overflow-hidden rounded-xl border border-white/10">
-                                <img src={state.productData.baseImage} className="w-full h-full object-cover" />
-                            </div>
-                            <button onClick={initMobileUpload} className="mt-4 text-xs text-slate-400 underline hover:text-white">Escanear otro código</button>
-                         </div>
+                         <div className="w-full"><div className="flex items-center justify-center gap-2 text-emerald-400 mb-4 bg-emerald-500/10 py-2 rounded-lg"><CheckCircle size={16} /> <span className="text-sm font-bold">¡Imagen recibida!</span></div><div className="relative w-full h-48 overflow-hidden rounded-xl border border-white/10"><img src={state.productData.baseImage} className="w-full h-full object-cover" /></div><button onClick={initMobileUpload} className="mt-4 text-xs text-slate-400 underline hover:text-white">Escanear otro código</button></div>
                      ) : (
-                        <>
-                            {qrSessionId ? (
-                                <>
-                                    <div className="bg-white p-4 rounded-xl mb-4 shadow-[0_0_30px_rgba(255,255,255,0.1)]">
-                                        <QRCode 
-                                            value={`${window.location.origin}/?mobile_upload=${qrSessionId}`} 
-                                            size={160}
-                                        />
-                                    </div>
-                                    <h4 className="text-white font-bold mb-1 flex items-center gap-2">
-                                        <Smartphone size={16} className="text-indigo-400" /> Escanea con tu celular
-                                    </h4>
-                                    <p className="text-xs text-slate-400 max-w-[200px]">
-                                        Abre la cámara de tu teléfono y escanea para subir la foto instantáneamente.
-                                    </p>
-                                    <div className="mt-4 flex items-center gap-2 text-[10px] text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full animate-pulse">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
-                                        Esperando conexión...
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="py-10">
-                                    <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto"></div>
-                                </div>
-                            )}
-                        </>
+                        <>{qrSessionId ? (<><div className="bg-white p-4 rounded-xl mb-4 shadow-[0_0_30px_rgba(255,255,255,0.1)]"><QRCode value={`${window.location.origin}/?mobile_upload=${qrSessionId}`} size={160} /></div><h4 className="text-white font-bold mb-1 flex items-center gap-2"><Smartphone size={16} className="text-indigo-400" /> Escanea con tu celular</h4><p className="text-xs text-slate-400 max-w-[200px]">Abre la cámara de tu teléfono y escanea para subir la foto instantáneamente.</p><div className="mt-4 flex items-center gap-2 text-[10px] text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full animate-pulse"><div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>Esperando conexión...</div></>) : (<div className="py-10"><div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto"></div></div>)}</>
                      )}
                   </div>
               )}
@@ -466,7 +290,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
-      {/* STEP 5 & 6 (Loading & Results) - Keep same logic as before */}
       {state.step === 5 && (
         <div className="h-full flex flex-col items-center justify-center text-center space-y-8 animate-in fade-in duration-700 mt-20">
           <div className="relative">

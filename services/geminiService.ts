@@ -1,271 +1,147 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { supabase } from "../lib/supabase";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier, ContentType, Platform } from "../types";
 
-// --- CONFIGURATION ---
-const getGeminiKey = () => {
-  // @ts-ignore
-  if (import.meta.env?.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
-  try {
-    // @ts-ignore
-    const key = process.env.API_KEY;
-    if (key) return key;
-  } catch (e) {}
-  return "";
-};
+// --- HELPER: Invocador Seguro ---
 
-const GEMINI_API_KEY = getGeminiKey();
-const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
-
-if (!GEMINI_API_KEY) {
-    console.warn("⚠️ IA Service: No API Key found.");
-}
-
-const cleanJsonText = (text: string | undefined): string => {
-  if (!text) return '{}';
-  return text.replace(/```json/g, '').replace(/```/g, '').trim();
-};
-
-// --- GENERATORS ---
-
-// 1. Copywriting Generator
-const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
-  const { platform, productData } = state;
+const invokeAI = async (action: string, payload: any) => {
+  console.log(`📡 Llamando a Edge Function: ${action}`);
   
-  const fallback = { 
-    copy: `${productData.name} - ${productData.benefit} 🔥\n\n${productData.description}\n\n¡Consíguelo ahora!`, 
-    hashtags: ["#sellfy", "#viral", "#fyp"] 
-  };
+  // Llama a la Edge Function 'sellfy-api' desplegada en Supabase
+  const { data, error } = await supabase.functions.invoke('sellfy-api', {
+    body: { action, ...payload }
+  });
 
+  if (error) {
+    console.error(`Edge Function Error (${action}):`, error);
+    // Si el error es de conexión o timeout, damos un mensaje amigable
+    throw new Error("Error de conexión con el servidor de IA. Por favor intenta de nuevo.");
+  }
+
+  // Si la función devuelve un error explícito en el JSON
+  if (data && data.error) {
+    throw new Error(data.error);
+  }
+
+  return data;
+};
+
+// --- GENERADORES ---
+
+// 1. Generar Textos (Copy) - Server-side
+export const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   try {
-    if (!ai) return fallback;
-
-    const prompt = `
-      ROLE: Expert Social Media Copywriter.
-      TASK: Write a persuasive caption for "${productData.name}".
-      
-      PRODUCT INFO:
-      - Description: ${productData.description}
-      - Main Benefit: ${productData.benefit}
-      - Offer: ${productData.promoDetails || 'N/A'}
-      - Price/Info: ${productData.price || 'N/A'}
-      
-      CONTEXT:
-      - Platform: ${platform}
-      - Visual Angle: ${angleDescription}
-      - Tone: ${settings.tone}
-      - Audience: ${productData.targetAudience || settings.targetAudience}
-
-      REQUIREMENTS:
-      - Use AIDA framework (Attention, Interest, Desire, Action).
-      - Add relevant emojis.
-      - If an OFFER is present ("${productData.promoDetails}"), mention it explicitly and urgently.
-      - If PRICE is present ("${productData.price}"), include it naturally.
-      - 3-5 high traffic hashtags.
-      - Language: Spanish (Native).
-      
-      OUTPUT JSON: { "copy": "string", "hashtags": ["string"] }
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: { responseMimeType: 'application/json' }
+    const result = await invokeAI('generate_copy', {
+      productData: state.productData,
+      platform: state.platform,
+      settings,
+      angle: angleDescription
     });
-
-    const result = JSON.parse(cleanJsonText(response.text));
-    return {
-      copy: result.copy || fallback.copy,
-      hashtags: result.hashtags || fallback.hashtags
-    };
+    return result;
   } catch (error) {
-    console.warn("Copy Gen Error:", error);
-    return fallback;
+    console.warn("Fallo en generación de copy, usando fallback local:", error);
+    return { 
+      copy: `${state.productData.name} - ${state.productData.benefit} 🔥\n\n${state.productData.description || ''}`, 
+      hashtags: ["#sellfy", "#viral", "#trending"] 
+    };
   }
 };
 
-// 2. Image Generator (High Fidelity Logic)
-const generateWithGeminiImage = async (prompt: string, productData: any, plan: PlanTier, visualStyle: string): Promise<string | null> => {
-    try {
-        if (!ai) throw new Error("No AI Key");
-        
-        const isPro = plan === 'pro';
-        const model = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-        
-        const parts: any[] = [];
-        let finalPrompt = "";
-
-        // Text Overlay Logic
-        const textOverlayInstruction = (productData.promoDetails || productData.price) 
-          ? `TEXT RENDERING: Try to include visible text in the scene if natural. 
-             Offer Text: "${productData.promoDetails || ''}" 
-             Price Text: "${productData.price || ''}". 
-             Ensure text is legible and integrated into the ${visualStyle} style.` 
-          : "";
-
-        if (productData.baseImage) {
-            const matches = productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
-            if (matches) {
-                parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
-                
-                // CRITICAL PROMPT FOR FIDELITY
-                finalPrompt = `
-                  ROLE: Professional Product Photographer & Retoucher.
-                  TASK: Background Replacement & Environment Compositing.
-                  
-                  STRICT CONSTRAINT: 
-                  - KEEP THE PRODUCT (Subject) EXACTLY AS IT IS in the input image. 
-                  - DO NOT change the product logo, text, shape, or color.
-                  - Only improve lighting and resolution of the product (Upscaling).
-                  
-                  NEW ENVIRONMENT:
-                  - Create a ${visualStyle} background.
-                  - Context: ${prompt}.
-                  - Lighting: Professional studio lighting matching the product.
-                  - Integration: Ensure realistic shadows and reflections on the surface.
-                  
-                  ${textOverlayInstruction}
-                `;
-            }
-        } else {
-             // Generative Fallback if no image provided
-             finalPrompt = `
-               Professional commercial photography of ${productData.name}.
-               Description: ${productData.description}.
-               Style: ${visualStyle}.
-               Setting: ${prompt}.
-               Lighting: Studio quality, 8k resolution.
-               ${textOverlayInstruction}
-             `;
-        }
-
-        console.log(`🎨 Generando imagen con IA...`);
-        parts.push({ text: finalPrompt });
-        
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: { parts },
-            config: isPro ? { imageConfig: { imageSize: '1K', aspectRatio: '1:1' } } : {}
-        });
-
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
-        }
-    } catch (e: any) {
-        console.error("AI Gen Error:", e.message || e);
-        if (plan === 'pro') {
-            return generateWithGeminiImage(prompt, productData, 'free', visualStyle);
-        }
-    }
-    return null;
+// 2. Regenerar solo texto - Server-side
+export const regenerateCopyOnly = async (productName: string, platform: string, tone: string): Promise<string> => {
+  try {
+    const { text } = await invokeAI('regenerate_copy', {
+      productName,
+      platform,
+      tone
+    });
+    return text;
+  } catch (e) {
+    console.error(e);
+    return "Error al regenerar texto. Intenta de nuevo.";
+  }
 };
 
-// 3. Video Generator
-const generateWithVeoText = async (prompt: string): Promise<string | null> => {
-    try {
-        if (!ai) throw new Error("No AI Key");
-        
-        console.log("🎥 Generando video...");
-        let operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview', 
-            prompt: prompt,
-            config: {
-                numberOfVideos: 1,
-                resolution: '720p',
-                aspectRatio: '9:16'
-            }
-        });
-
-        while (!operation.done) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            // @ts-ignore
-            operation = await ai.operations.getVideosOperation({ operation: operation });
-        }
-        
-        // @ts-ignore
-        const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-        return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
-    } catch (e) { 
-        console.error("Video Gen Error:", e);
-        return null; 
-    }
-};
-
-// 4. Image Animation
+// 3. Animación de Video (Veo) - Server-side Initiation & Polling
 export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
-    try {
-        if (!ai) throw new Error("No AI Key");
+  try {
+    console.log("🎥 Iniciando animación en servidor...");
+    
+    // Paso 1: Iniciar operación
+    const { operationName } = await invokeAI('animate_image', {
+      image: imageBase64
+    });
 
-        const matches = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
-        if (!matches) throw new Error("Invalid format");
+    if (!operationName) throw new Error("No se recibió ID de operación");
 
-        let operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview', 
-            prompt: "Slow motion cinematic camera movement, enhance lighting, keep product static and sharp.",
-            image: {
-                imageBytes: matches[2],
-                mimeType: matches[1]
-            },
-            config: {
-                numberOfVideos: 1,
-                resolution: '720p',
-                aspectRatio: '1:1' 
-            }
-        });
+    // Paso 2: Polling (Preguntar estado)
+    let attempts = 0;
+    const maxAttempts = 24; // ~2 minutos (5s intervalo)
 
-        while (!operation.done) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            // @ts-ignore
-            operation = await ai.operations.getVideosOperation({ operation: operation });
+    while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 5000));
+        attempts++;
+        
+        const status = await invokeAI('get_video_operation', { operationName });
+        
+        if (status.done && status.videoUri) {
+            return status.videoUri; 
         }
         
-        // @ts-ignore
-        const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-        return videoUri ? `${videoUri}&key=${GEMINI_API_KEY}` : null;
-
-    } catch (e: any) {
-        console.error("Animation Error:", e.message || e);
-        return null;
+        console.log(`Procesando video... ${attempts}/${maxAttempts}`);
     }
+
+    return null;
+
+  } catch (e) {
+    console.error("Animation Error:", e);
+    return null;
+  }
 };
 
-// --- MAIN ORCHESTRATOR ---
+// --- ORQUESTADOR PRINCIPAL ---
 
 const generateVariantContent = async (index: number, angle: string, state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<ContentVariant> => {
-    const { productData, platform, visualStyle, contentType } = state;
-    
+    const { productData, platform, contentType } = state;
     const isVideoRequest = contentType === ContentType.VIDEO_REEL || platform === Platform.TIKTOK || platform === Platform.IG_REELS;
-
-    // Richer prompt construction for background context
-    const promptContext = `
-      Composition: ${angle}.
-      Product Context: ${productData.description}.
-      Platform Aesthetic: ${platform}.
-      Brand Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
-    `;
 
     let mediaUrl: string | null = null;
     let isVideoResult = false;
+    let textData = { copy: "", hashtags: [] as string[] };
 
-    if (isVideoRequest) {
-        mediaUrl = await generateWithVeoText(`Cinematic video of ${productData.name} in a ${visualStyle} environment. ${promptContext}`);
-        isVideoResult = true;
-    } else {
-        mediaUrl = await generateWithGeminiImage(promptContext, productData, plan, visualStyle || 'Studio');
+    try {
+        // Ejecutar generación visual y textual en paralelo
+        const [mediaResponse, copyResponse] = await Promise.all([
+            invokeAI('generate_visual', {
+                index,
+                angle,
+                state,
+                settings,
+                plan,
+                isVideoRequest
+            }),
+            generateVariantCopy(state, settings, angle)
+        ]);
+
+        mediaUrl = mediaResponse.url;
+        isVideoResult = mediaResponse.isVideo;
+        textData = copyResponse;
+
+    } catch (e) {
+        console.error("Fallo generando variante:", e);
+        // Fallback visual si falla la IA
+        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}`;
+        
+        // Intentamos recuperar texto aunque falle la imagen
+        textData = await generateVariantCopy(state, settings, angle).catch(() => ({ copy: productData.name, hashtags: [] }));
     }
-
-    if (!mediaUrl) {
-         mediaUrl = `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name || "Error")}`;
-    }
-
-    const textData = await generateVariantCopy(state, settings, angle);
 
     return {
         id: `var-${Date.now()}-${index}`,
-        image: mediaUrl,
+        image: mediaUrl || "",
         isVideo: isVideoResult,
-        copy: textData.copy,
-        hashtags: textData.hashtags,
+        copy: textData.copy || "",
+        hashtags: textData.hashtags || [],
         angle: angle
     };
 };
@@ -273,17 +149,18 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
 export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
   const isVideo = state.contentType === ContentType.VIDEO_REEL || state.platform === Platform.TIKTOK || state.platform === Platform.IG_REELS;
   
-  const angles = isVideo ? ["Dynamic Reveal", "Lifestyle Usage", "Cinematic Mood", "Product Details"] 
-                         : ["Hero Shot (Centered)", "Lifestyle Context", "Creative Angle", "Close-up Detail"];
+  const angles = isVideo 
+      ? ["Dynamic Reveal", "Lifestyle Usage", "Cinematic Mood", "Product Details"] 
+      : ["Hero Shot (Centered)", "Lifestyle Context", "Creative Angle", "Close-up Detail"];
 
-  console.log(`🚀 Iniciando campaña...`);
+  console.log(`🚀 Iniciando campaña segura vía Edge Functions...`);
 
   const variants: ContentVariant[] = [];
   
+  // Generación secuencial
   for (let i = 0; i < angles.length; i++) {
       const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);
-      if (i < angles.length - 1) await new Promise(r => setTimeout(r, 500));
   }
 
   return {

@@ -37,7 +37,7 @@ const IntroAnimation: React.FC<{ onFinish: () => void }> = ({ onFinish }) => {
 
   useEffect(() => {
     setPhrase(phrases[Math.floor(Math.random() * phrases.length)]);
-    const duration = 2500; // Faster intro for better UX
+    const duration = 2500;
     const intervalTime = 50;
     const steps = duration / intervalTime;
     let currentStep = 0;
@@ -111,7 +111,6 @@ const SellfyApp: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('wizard');
   const [lang, setLang] = useState<Language>('es');
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const [showIntro, setShowIntro] = useState(false);
   const [introSeen, setIntroSeen] = useState(false);
 
@@ -129,16 +128,6 @@ const SellfyApp: React.FC = () => {
     if (mobileId) {
       setMobileSessionId(mobileId);
     }
-
-    // Check API Key
-    let hasKey = false;
-    // @ts-ignore
-    if (import.meta.env?.VITE_API_KEY || import.meta.env?.API_KEY) hasKey = true;
-    try { 
-        // @ts-ignore
-        if (process.env.API_KEY) hasKey = true; 
-    } catch(e) {}
-    if (!hasKey) setApiKeyMissing(true);
   }, []);
 
   useEffect(() => {
@@ -197,7 +186,6 @@ const SellfyApp: React.FC = () => {
               businessSettings={settings}
               onCampaignCreated={saveCampaign}
               onViewImage={setFullScreenImage}
-              apiKeyMissing={apiKeyMissing}
               subscription={subscription}
               onDecrementCredit={decrementCredits}
             />
