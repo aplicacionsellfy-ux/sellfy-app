@@ -80,17 +80,22 @@ export function useProfile(userId: string | undefined) {
     }
   };
 
-  // Restar créditos (Llamado después de generar campaña)
-  const decrementCredits = async () => {
-    if (!userId || subscription.credits <= 0) return;
+  // Restar créditos (Dinámico)
+  const decrementCredits = async (amount: number = 1) => {
+    if (!userId) return;
+    
+    if (subscription.credits < amount) {
+        addToast("No tienes suficientes créditos", "error");
+        return;
+    }
 
     // UI Optimista
-    setSubscription(prev => ({ ...prev, credits: prev.credits - 1 }));
+    const newCredits = Math.max(0, subscription.credits - amount);
+    setSubscription(prev => ({ ...prev, credits: newCredits }));
 
-    // RPC Call sería mejor, pero por ahora update directo
     const { error } = await supabase
       .from('profiles')
-      .update({ credits: subscription.credits - 1 })
+      .update({ credits: newCredits })
       .eq('id', userId);
       
     if (error) console.error("Error updating credits", error);
@@ -106,14 +111,14 @@ export function useProfile(userId: string | undefined) {
         return;
     }
 
-    const newCredits = planDetails.credits;
+    const newMaxCredits = planDetails.credits;
     
     // Al hacer upgrade, reseteamos los créditos al máximo del nuevo plan (Bonus de bienvenida)
-    setSubscription({ plan: newPlan, credits: newCredits, maxCredits: newCredits });
+    setSubscription({ plan: newPlan, credits: newMaxCredits, maxCredits: newMaxCredits });
 
     const { error } = await supabase
       .from('profiles')
-      .update({ plan: newPlan, credits: newCredits })
+      .update({ plan: newPlan, credits: newMaxCredits })
       .eq('id', userId);
       
     if (error) addToast("Error actualizando plan", "error");

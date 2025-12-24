@@ -5,12 +5,15 @@ export enum ContentType {
   PROMO = 'Promoción / Descuento',
   LAUNCH = 'Lanzamiento',
   TESTIMONIAL = 'Testimonio',
-  BRANDING = 'Branding'
+  BRANDING = 'Branding',
+  VIDEO_REEL = 'Video Reel / TikTok'
 }
 
 export enum Platform {
   IG_FEED = 'Instagram Feed',
   IG_STORIES = 'Instagram Stories',
+  IG_REELS = 'Instagram Reels',
+  TIKTOK = 'TikTok',
   FB_FEED = 'Facebook Feed',
   FB_ADS = 'Facebook Ads',
   WA_CATALOG = 'WhatsApp Catalog'
@@ -23,7 +26,8 @@ export enum VisualStyle {
   CREATIVE = 'Creativo / Colorido',
   DARK = 'Oscuro / Elegante',
   VIBRANT = 'Colores Vivos',
-  ECOMMERCE = 'Fondo Blanco (E-commerce)'
+  ECOMMERCE = 'Fondo Blanco (E-commerce)',
+  CINEMATIC = 'Cinemático (Video)'
 }
 
 export type PlanTier = 'free' | 'starter' | 'pro';
@@ -72,7 +76,8 @@ export interface WizardState {
 
 export interface ContentVariant {
   id: string;
-  image: string; // Base64 image URI
+  image: string; // Base64 image URI or Video URL
+  isVideo: boolean; // Flag to identify video content
   copy: string;
   hashtags: string[];
   angle: string; // Description of the angle/variant type

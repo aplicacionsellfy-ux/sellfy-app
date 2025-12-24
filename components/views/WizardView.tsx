@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock } from 'lucide-react';
-import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS } from '../../constants';
+import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Info } from 'lucide-react';
+import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS } from '../../constants';
 import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription } from '../../types';
 import { generateCampaign } from '../../services/geminiService';
 import { SelectionCard, VariantCard } from '../Shared';
@@ -12,7 +12,7 @@ interface WizardViewProps {
   onViewImage: (img: string) => void;
   apiKeyMissing: boolean;
   subscription: UserSubscription;
-  onDecrementCredit: () => void;
+  onDecrementCredit: (amount: number) => void;
 }
 
 export const WizardView: React.FC<WizardViewProps> = ({ 
@@ -41,6 +41,13 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   const [result, setResult] = useState<CampaignResult | null>(null);
 
+  const isVideo = 
+    state.contentType === ContentType.VIDEO_REEL || 
+    state.platform === Platform.TIKTOK || 
+    state.platform === Platform.IG_REELS;
+
+  const currentCost = isVideo ? CREDIT_COSTS.VIDEO : CREDIT_COSTS.IMAGE;
+
   const nextStep = () => setState(prev => ({ ...prev, step: prev.step + 1 }));
   const prevStep = () => setState(prev => ({ ...prev, step: prev.step - 1 }));
 
@@ -54,14 +61,14 @@ export const WizardView: React.FC<WizardViewProps> = ({
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        addToast("La imagen debe pesar menos de 2MB", "error");
+      if (file.size > 4 * 1024 * 1024) {
+        addToast("La imagen debe pesar menos de 4MB", "error");
         return;
       }
       const reader = new FileReader();
       reader.onloadend = () => {
         updateProductData('baseImage', reader.result as string);
-        addToast("Imagen cargada correctamente", "success");
+        addToast("Imagen cargada. Gemini Vision mantendrá la fidelidad de tu producto.", "success");
       };
       reader.readAsDataURL(file);
     }
@@ -69,28 +76,27 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   const handleGenerate = async () => {
     if (apiKeyMissing) {
-        addToast("Error de configuración: Falta API Key", "error");
+        addToast("Error: Falta la API Key de Gemini", "error");
         return;
     }
 
-    if (subscription.credits <= 0) {
-        addToast("¡Te has quedado sin créditos! Actualiza tu plan.", "error");
+    if (subscription.credits < currentCost) {
+        addToast(`Necesitas ${currentCost} créditos. Tienes ${subscription.credits}.`, "error");
         return;
     }
 
     nextStep(); 
     
     try {
-      // Pass the current plan to the generator to adjust quality/model
       const generated = await generateCampaign(state, businessSettings, subscription.plan);
       setResult(generated);
       onCampaignCreated(generated); 
-      onDecrementCredit(); 
+      onDecrementCredit(currentCost); 
       setState(prev => ({ ...prev, step: 6 })); 
-      addToast("¡Campaña generada con éxito!", "success");
+      addToast("¡Contenido generado!", "success");
     } catch (e) {
       console.error(e);
-      addToast("Hubo un error generando el contenido. Intenta de nuevo.", "error");
+      addToast("Error generando contenido. Intenta de nuevo.", "error");
       prevStep();
     }
   };
@@ -116,21 +122,23 @@ export const WizardView: React.FC<WizardViewProps> = ({
           <h1 className="text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white via-indigo-100 to-indigo-300 mb-2 tracking-tighter">sellfy</h1>
           <p className="text-xs uppercase tracking-[0.3em] text-indigo-400 font-bold mb-6">Crea, publica, vende</p>
           <p className="text-lg text-slate-400 mb-10 leading-relaxed font-light">
-            Tu producto, listo para vender en <span className="text-indigo-400 font-semibold drop-shadow-[0_0_10px_rgba(129,140,248,0.5)]">5 minutos</span>.
+             Powered by <span className="text-indigo-400 font-semibold">Gemini 3 Pro & Google Veo</span> para máxima fidelidad.
           </p>
           
           {apiKeyMissing ? (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm mb-4 backdrop-blur-sm">
-              Error crítico: Falta la API KEY en el entorno.
+              Error crítico: Falta la API KEY de Gemini en el entorno.
             </div>
           ) : (
-            <button 
-              onClick={nextStep}
-              className="group w-full relative bg-indigo-600 hover:bg-indigo-500 text-white text-lg font-semibold py-4 px-8 rounded-2xl shadow-[0_0_20px_rgba(79,70,229,0.4)] transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 overflow-hidden"
-            >
-              <span className="relative z-10 flex items-center gap-2">Comenzar Ahora <ChevronRight size={20} /></span>
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
-            </button>
+             <div className="space-y-4 w-full">
+                <button 
+                  onClick={nextStep}
+                  className="group w-full relative bg-indigo-600 hover:bg-indigo-500 text-white text-lg font-semibold py-4 px-8 rounded-2xl shadow-[0_0_20px_rgba(79,70,229,0.4)] transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 overflow-hidden"
+                >
+                  <span className="relative z-10 flex items-center gap-2">Comenzar Ahora <ChevronRight size={20} /></span>
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
+                </button>
+             </div>
           )}
         </div>
       </div>
@@ -139,6 +147,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
   return (
     <div className={`max-w-2xl mx-auto pt-6 pb-32 ${state.step === 6 ? 'max-w-[1400px]' : ''}`}>
+      {/* Progress Bar */}
       {state.step > 0 && state.step < 6 && (
           <div className="w-full mb-10 shrink-0 relative z-40">
             <div className="h-1.5 bg-white/5 w-full rounded-full overflow-hidden border border-white/5 backdrop-blur-sm">
@@ -150,6 +159,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
       )}
 
+      {/* STEP 1: Content Type */}
       {state.step === 1 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -171,11 +181,12 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
+      {/* STEP 2: Platform */}
       {state.step === 2 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-white tracking-tight mb-2">¿Dónde publicarás?</h2>
-            <p className="text-slate-500">Optimizaremos el formato para la plataforma</p>
+            <p className="text-slate-500">Optimizaremos la relación de aspecto</p>
           </div>
           <div className="space-y-3">
             {PLATFORM_OPTIONS.map((opt) => (
@@ -203,6 +214,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
+      {/* STEP 3: Visual Style */}
       {state.step === 3 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
@@ -224,11 +236,12 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
+      {/* STEP 4: Product Data */}
       {state.step === 4 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-white tracking-tight mb-2">Detalles del Producto</h2>
-            <p className="text-slate-500">La IA hará la magia con esta información</p>
+            <p className="text-slate-500">Gemini Vision analizará esto para máxima fidelidad</p>
           </div>
 
           <div className="bg-white/5 backdrop-blur-lg p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl">
@@ -264,31 +277,8 @@ export const WizardView: React.FC<WizardViewProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Precio (Opcional)</label>
-                <input 
-                  type="text" 
-                  className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none"
-                  placeholder="$99.00"
-                  value={state.productData.price}
-                  onChange={(e) => updateProductData('price', e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Promo (Opcional)</label>
-                <input 
-                  type="text" 
-                  className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none"
-                  placeholder="20% OFF"
-                  value={state.productData.promoDetails}
-                  onChange={(e) => updateProductData('promoDetails', e.target.value)}
-                />
-              </div>
-            </div>
-
             <div className="pt-2">
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Foto de referencia (Opcional)</label>
+              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Foto de referencia (Muy Recomendado)</label>
               <div className="relative group">
                 <input 
                   type="file" 
@@ -310,7 +300,10 @@ export const WizardView: React.FC<WizardViewProps> = ({
                       <div className="bg-white/5 p-4 rounded-full mb-3 group-hover:bg-indigo-500/20 transition-colors">
                         <Upload size={24} />
                       </div>
-                      <span className="text-sm font-medium">Subir imagen base</span>
+                      <span className="text-sm font-medium">Subir foto real</span>
+                      <p className="text-[9px] text-slate-500 mt-2 text-center max-w-[200px]">
+                         Gemini Vision usará esta foto para mantener tu producto idéntico.
+                      </p>
                     </div>
                   )}
                 </label>
@@ -321,6 +314,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
+      {/* STEP 5: Loading */}
       {state.step === 5 && (
         <div className="h-full flex flex-col items-center justify-center text-center space-y-8 animate-in fade-in duration-700 mt-20">
           <div className="relative">
@@ -329,17 +323,24 @@ export const WizardView: React.FC<WizardViewProps> = ({
             <Sparkles className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-indigo-400 animate-pulse drop-shadow-[0_0_10px_rgba(129,140,248,0.8)]" size={48} />
           </div>
           <div>
-            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Generando Magia</h2>
-            <p className="text-slate-500 text-lg font-light">Analizando producto... Redactando copy... <br/>Diseñando imágenes...</p>
+            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Creando Magia</h2>
+            <p className="text-slate-500 text-lg font-light">
+              {isVideo ? "Gemini y Veo están renderizando tu video..." : "Gemini Vision está diseñando tus imágenes..."}
+              <br/>
+              <span className="text-xs text-indigo-400 mt-2 block">
+                 Costo: {currentCost} créditos
+              </span>
+            </p>
           </div>
         </div>
       )}
 
+      {/* STEP 6: Results */}
       {state.step === 6 && result && (
         <div className="space-y-8 pb-20 animate-in slide-in-from-bottom-8 duration-500">
           <div className="text-center mb-8">
              <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">¡Campaña Lista!</h2>
-             <p className="text-slate-400">Hemos generado 4 opciones únicas para {state.platform}</p>
+             <p className="text-slate-400">Generado con IA de última generación para {state.platform}</p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -348,13 +349,14 @@ export const WizardView: React.FC<WizardViewProps> = ({
                 key={variant.id} 
                 variant={variant} 
                 onView={onViewImage} 
-                showWatermark={subscription.plan === 'free'} // Validates plan to show/hide watermark
+                showWatermark={subscription.plan === 'free'} 
               />
             ))}
           </div>
         </div>
       )}
 
+      {/* Footer Nav */}
       {state.step > 0 && state.step < 5 && (
         <footer className="absolute bottom-0 left-0 right-0 bg-[#020617]/90 backdrop-blur-xl border-t border-white/5 p-6 z-50 animate-in slide-in-from-bottom-4">
           <div className="max-w-2xl mx-auto flex gap-4">
@@ -365,11 +367,14 @@ export const WizardView: React.FC<WizardViewProps> = ({
               <ChevronLeft size={24} />
             </button>
             
-            {subscription.credits <= 0 && state.step === 4 ? (
+            {subscription.credits < currentCost && state.step === 4 ? (
                <div className="flex-1 bg-slate-800 border border-red-500/30 rounded-xl p-4 flex items-center justify-between">
                  <div className="flex items-center gap-3">
                    <Lock className="text-red-400" size={20} />
-                   <span className="text-sm font-medium text-slate-300">Sin créditos disponibles</span>
+                   <div>
+                       <span className="text-sm font-medium text-slate-300 block">Insuficientes créditos</span>
+                       <span className="text-xs text-slate-500 block">Requieres {currentCost}, tienes {subscription.credits}</span>
+                   </div>
                  </div>
                  <span className="text-xs font-bold text-indigo-400 uppercase tracking-wide">Mejorar Plan</span>
                </div>
@@ -389,7 +394,11 @@ export const WizardView: React.FC<WizardViewProps> = ({
                     : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_0_25px_rgba(79,70,229,0.3)] hover:scale-[1.01]'}
                 `}
                 >
-                {state.step === 4 ? 'Generar Contenido' : 'Continuar'}
+                {state.step === 4 ? (
+                    <span className="flex items-center gap-2">
+                        Generar <span className="text-xs bg-black/20 px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/10"><Zap size={10} fill="currentColor"/> -{currentCost}</span>
+                    </span>
+                ) : 'Continuar'}
                 {state.step === 4 ? <Sparkles size={20} className="animate-pulse" /> : <ChevronRight size={24} />}
                 </button>
             )}
