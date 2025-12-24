@@ -82,21 +82,50 @@ Deno.serve(async (req: Request) => {
 
     // C. Generar Imagen Visual - Gemini 2.5 Flash Image (Nano Banana)
     if (action === 'generate_visual') {
-        const { angle, state, settings, plan } = payload;
+        const { angle, state, settings } = payload;
         const { productData, visualStyle } = state;
 
-        let promptText = `Professional product photography of ${productData.name}. 
-        Style: ${visualStyle}. Composition: ${angle}. 
-        Key Feature: ${productData.benefit}.
-        Brand Colors: ${settings.primaryColor}.
-        Lighting: Studio lighting, high quality, 4k.`;
+        // Construcción del contenido multimodal
+        const parts = [];
+
+        // 1. Mensaje de Texto (Prompt) - Estricto sobre la fidelidad
+        let promptText = `
+          Generate a high-quality product photography of the product shown in the input image.
+          
+          CRITICAL INSTRUCTIONS:
+          - You MUST preserve the exact product appearance (packaging, label, logo, colors, shape) from the reference image. Do not invent a new bottle or logo.
+          - Place the product in a ${visualStyle} setting.
+          - Composition: ${angle}.
+          - Lighting: Studio lighting, high quality, 4k.
+          - Brand Colors to integrate in background: ${settings.primaryColor}.
+        `;
+        
+        if (!state.productData.baseImage) {
+           promptText += `\n(No reference image provided, generate a generic product matching description: ${productData.name})`;
+        }
+
+        parts.push({ text: promptText });
+
+        // 2. Imagen Base (Si existe)
+        if (state.productData.baseImage) {
+            // Extraer base64 crudo (remover 'data:image/jpeg;base64,')
+            const matches = state.productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
+            if (matches) {
+                parts.push({
+                    inlineData: {
+                        mimeType: matches[1],
+                        data: matches[2]
+                    }
+                });
+            }
+        }
 
         try {
-            // Usamos Gemini 2.5 Flash Image para generación rápida y alta calidad
+            // Usamos Gemini 2.5 Flash Image que soporta input de imagen
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents: {
-                    parts: [{ text: promptText }],
+                    parts: parts,
                 },
                 config: {
                     imageConfig: {
@@ -124,9 +153,11 @@ Deno.serve(async (req: Request) => {
             throw new Error("No image generated in response parts");
         } catch (e) {
             console.error("Image gen failed:", e);
+            // Fallback en caso de error
             return new Response(JSON.stringify({ 
                 url: `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name)}`, 
-                isVideo: false 
+                isVideo: false,
+                error: e.message
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -140,44 +171,59 @@ Deno.serve(async (req: Request) => {
         
         if (!matches) throw new Error("Invalid image format");
 
-        const operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
-            prompt: "Cinematic slow motion product reveal, professional lighting.",
-            image: { 
-                imageBytes: matches[2], 
-                mimeType: matches[1] 
-            },
-            config: { 
-                numberOfVideos: 1,
-                resolution: '720p',
-                aspectRatio: '9:16' // Optimizado para Reels/TikTok
-            }
-        });
+        try {
+            const operation = await ai.models.generateVideos({
+                model: 'veo-3.1-fast-generate-preview',
+                prompt: "Cinematic slow motion product reveal, professional lighting, maintaining product fidelity.",
+                image: { 
+                    imageBytes: matches[2], 
+                    mimeType: matches[1] 
+                },
+                config: { 
+                    numberOfVideos: 1,
+                    resolution: '720p',
+                    aspectRatio: '9:16'
+                }
+            });
 
-        return new Response(JSON.stringify({ operationName: operation.name }), {
-             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            return new Response(JSON.stringify({ operationName: operation.name }), {
+                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        } catch (e) {
+            console.error("Video creation failed:", e);
+            throw new Error(`Video init failed: ${e.message}`);
+        }
     }
 
     // E. Consultar Estado del Video (Polling)
     if (action === 'get_video_operation') {
         const { operationName } = payload;
         
-        // @ts-ignore
-        const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
-        
-        let videoUri = null;
-        if (operation.done) {
-             // @ts-ignore
-             const rawUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-             if (rawUri) {
-                 videoUri = `${rawUri}&key=${apiKey}`;
-             }
-        }
+        try {
+            // Fix: La librería espera 'name' directamente en la llamada si es por nombre
+            // o un objeto operation si se pasa el objeto completo.
+            // Para ser seguros con la versión de Edge, pasamos name como propiedad.
+            const operation = await ai.operations.getVideosOperation({ name: operationName });
+            
+            let videoUri = null;
+            if (operation.done) {
+                 // @ts-ignore
+                 const rawUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+                 if (rawUri) {
+                     videoUri = `${rawUri}&key=${apiKey}`;
+                 }
+            }
 
-        return new Response(JSON.stringify({ done: operation.done, videoUri }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            return new Response(JSON.stringify({ done: operation.done, videoUri }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        } catch (e) {
+            console.error("Polling error:", e);
+            // Devolver 200 con error JSON para evitar el 500 fatal en el cliente
+            return new Response(JSON.stringify({ done: false, error: e.message }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+        }
     }
 
     throw new Error(`Unknown action: ${action}`);

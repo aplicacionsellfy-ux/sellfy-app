@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Briefcase, Link as LinkIcon, Users, Palette, Save } from 'lucide-react';
+import { Briefcase, Link as LinkIcon, Users, Palette, Save, Check } from 'lucide-react';
 import { BusinessSettings } from '../../types';
 import { useToast } from '../ui/Toast';
 
@@ -7,6 +8,18 @@ interface SettingsViewProps {
   settings: BusinessSettings;
   updateSettings: (key: string, value: string) => void;
 }
+
+const PRESET_COLORS = [
+  '#6366f1', // Indigo
+  '#ec4899', // Pink
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#3b82f6', // Blue
+  '#ef4444', // Red
+  '#8b5cf6', // Violet
+  '#000000', // Black
+  '#ffffff', // White
+];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, updateSettings }) => {
   const { addToast } = useToast();
@@ -21,6 +34,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, updateSett
         addToast("Configuración guardada correctamente en la nube", "success");
     }, 800);
   };
+
+  const ColorPicker = ({ label, value, onChangeField }: { label: string, value: string, onChangeField: string }) => (
+    <div>
+      <div className="flex justify-between mb-3">
+        <span className="text-sm text-slate-300 font-medium">{label}</span>
+        <span className="text-xs text-slate-500 font-mono uppercase">{value}</span>
+      </div>
+      
+      {/* Paleta Predefinida */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {PRESET_COLORS.map((color) => (
+          <button
+            key={color}
+            onClick={() => updateSettings(onChangeField, color)}
+            className={`w-6 h-6 rounded-full border border-white/10 transition-transform hover:scale-110 flex items-center justify-center ${value === color ? 'ring-2 ring-white ring-offset-2 ring-offset-[#0B0F19]' : ''}`}
+            style={{ backgroundColor: color }}
+          >
+            {value === color && <Check size={12} className={color === '#ffffff' ? 'text-black' : 'text-white'} />}
+          </button>
+        ))}
+      </div>
+
+      {/* Input Custom */}
+      <div className="flex items-center gap-3 bg-[#020617]/50 border border-white/10 rounded-xl p-2 pr-4">
+        <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-white/10 shrink-0">
+           <input 
+            type="color" 
+            value={value}
+            onChange={(e) => updateSettings(onChangeField, e.target.value)}
+            className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer border-none p-0" 
+          />
+        </div>
+        <input 
+          type="text" 
+          value={value}
+          onChange={(e) => updateSettings(onChangeField, e.target.value)}
+          className="flex-1 bg-transparent text-white text-sm focus:outline-none font-mono uppercase"
+          placeholder="#000000"
+        />
+      </div>
+    </div>
+  );
 
   return (
     <div className="max-w-4xl mx-auto pt-10 animate-in fade-in duration-500 pb-20">
@@ -118,52 +173,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, updateSett
                <h3 className="font-bold text-lg text-white">Estilo Visual</h3>
              </div>
 
-             <div>
-               <label className="block text-xs font-bold text-slate-500 mb-4 uppercase tracking-wide">Paleta de Colores</label>
-               
-               <div className="space-y-4">
-                 <div>
-                   <div className="flex justify-between mb-2">
-                     <span className="text-sm text-slate-300">Color Primario</span>
-                     <span className="text-xs text-slate-500 font-mono">{settings.primaryColor}</span>
-                   </div>
-                   <div className="flex items-center gap-3">
-                     <input 
-                       type="color" 
-                       value={settings.primaryColor}
-                       onChange={(e) => updateSettings('primaryColor', e.target.value)}
-                       className="w-12 h-12 rounded-xl cursor-pointer bg-transparent border-none p-0 overflow-hidden" 
-                     />
-                     <input 
-                       type="text" 
-                       value={settings.primaryColor}
-                       onChange={(e) => updateSettings('primaryColor', e.target.value)}
-                       className="flex-1 bg-[#020617]/50 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:ring-2 focus:ring-rose-500/50 outline-none font-mono"
-                     />
-                   </div>
-                 </div>
-
-                 <div>
-                   <div className="flex justify-between mb-2">
-                     <span className="text-sm text-slate-300">Color Secundario</span>
-                     <span className="text-xs text-slate-500 font-mono">{settings.secondaryColor}</span>
-                   </div>
-                   <div className="flex items-center gap-3">
-                     <input 
-                       type="color" 
-                       value={settings.secondaryColor}
-                       onChange={(e) => updateSettings('secondaryColor', e.target.value)}
-                       className="w-12 h-12 rounded-xl cursor-pointer bg-transparent border-none p-0 overflow-hidden" 
-                     />
-                     <input 
-                       type="text" 
-                       value={settings.secondaryColor}
-                       onChange={(e) => updateSettings('secondaryColor', e.target.value)}
-                       className="flex-1 bg-[#020617]/50 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:ring-2 focus:ring-rose-500/50 outline-none font-mono"
-                     />
-                   </div>
-                 </div>
-               </div>
+             <div className="space-y-6">
+               <ColorPicker 
+                  label="Color Primario" 
+                  value={settings.primaryColor} 
+                  onChangeField="primaryColor" 
+               />
+               <ColorPicker 
+                  label="Color Secundario" 
+                  value={settings.secondaryColor} 
+                  onChangeField="secondaryColor" 
+               />
              </div>
 
              <div className="p-4 rounded-xl bg-[#020617]/50 border border-white/10 mt-4">
