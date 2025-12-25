@@ -11,15 +11,15 @@ const invokeAI = async (action: string, payload: any) => {
   });
 
   if (error) {
-    console.error(`Edge Function Error (${action}):`, error);
-    // Si es un error de red o timeout
-    throw new Error("Error de conexión con la IA. Verifica tu internet.");
+    console.error(`Edge Function Network Error (${action}):`, error);
+    // Error de red (Supabase no pudo contactar la función)
+    throw new Error("Error de conexión. Verifica tu internet e intenta de nuevo.");
   }
 
-  // Si la función devuelve un error explícito en el JSON (manejado por nuestro try-catch global en el backend)
+  // Verificar si la función devolvió un error lógico en el JSON (aunque el status sea 200)
   if (data && data.error) {
-    console.error(`API Logic Error (${action}):`, data.error);
-    throw new Error(data.error);
+    console.warn(`API Logic Error (${action}):`, data.error);
+    throw new Error(data.error); // Lanzamos el error para que lo atrape el try-catch del componente
   }
 
   return data;
@@ -38,7 +38,7 @@ export const generateVariantCopy = async (state: WizardState, settings: Business
     });
     return result;
   } catch (error) {
-    console.warn("Fallo en generación de copy, usando fallback local:", error);
+    console.warn("Fallback local para copy debido a error:", error);
     return { 
       copy: `${state.productData.name} - ${state.productData.benefit} 🔥\n\n${state.productData.description || ''}`, 
       hashtags: ["#sellfy", "#viral", "#trending"] 
@@ -55,16 +55,16 @@ export const regenerateCopyOnly = async (productName: string, platform: string, 
       tone
     });
     return text;
-  } catch (e) {
+  } catch (e: any) {
     console.error(e);
-    return "Error al regenerar texto.";
+    return `Error: ${e.message}`;
   }
 };
 
 // 3. Animación de Video (Veo)
 export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
   try {
-    console.log("🎥 Iniciando animación en servidor...");
+    console.log("🎥 Solicitando video a Veo...");
     
     // Paso 1: Iniciar operación
     const response = await invokeAI('animate_image', {
@@ -72,45 +72,48 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
     });
 
     if (!response || !response.operationName) {
-        throw new Error("No se recibió ID de operación del servidor.");
+        throw new Error("El servidor no devolvió un ID de operación.");
     }
     
     const { operationName } = response;
-    console.log(`Operación iniciada: ${operationName}`);
+    console.log(`Operación iniciada: ${operationName}. Comenzando espera...`);
 
     // Paso 2: Polling (Preguntar estado)
     let attempts = 0;
-    const maxAttempts = 60; // Aumentado a 5 minutos (5s * 60) para dar tiempo a Veo
+    const maxAttempts = 40; // ~3.5 minutos (5s * 40)
     
     while (attempts < maxAttempts) {
         await new Promise(r => setTimeout(r, 5000)); // Esperar 5s
         attempts++;
         
-        console.log(`Verificando video (Intento ${attempts}/${maxAttempts})...`);
-        const status = await invokeAI('get_video_operation', { operationName });
+        // Consultamos estado. Si falla internamente, invokeAI lanzará error, 
+        // pero la Edge Function ahora está blindada para no devolver 500, sino un JSON de error o done: false.
+        let status;
+        try {
+            status = await invokeAI('get_video_operation', { operationName });
+        } catch (pollError) {
+            console.warn(`Intento ${attempts} falló momentáneamente:`, pollError);
+            continue; // Intentar de nuevo
+        }
         
         if (status.done) {
             if (status.videoUri) {
-                console.log("¡Video completado!");
+                console.log("¡Video completado y URL recibida!");
                 return status.videoUri;
             } else {
-                console.error("Operación terminada pero sin URI de video", status);
-                throw new Error("Video generado pero URL no encontrada.");
+                console.error("Operación marcada como lista, pero sin URL.", status);
+                throw new Error("El video se generó pero no se pudo recuperar la URL.");
             }
         }
         
-        // Si hay un error de depuración en el backend, lo logueamos pero seguimos intentando
-        if (status.debugError) {
-             console.warn("Polling warning:", status.debugError);
-        }
+        console.log(`Procesando video... Intento ${attempts}/${maxAttempts}`);
     }
 
-    throw new Error("Tiempo de espera agotado generando video.");
+    throw new Error("El video está tardando demasiado. Intenta más tarde en el historial.");
 
   } catch (e: any) {
-    console.error("Animation Error:", e);
-    // Propagar el mensaje de error para que el Toast lo muestre
-    throw new Error(e.message || "Error generando video");
+    console.error("Animation Process Error:", e);
+    throw e; // Re-lanzar para que el UI muestre el Toast de error
   }
 };
 
@@ -125,7 +128,7 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
     let textData = { copy: "", hashtags: [] as string[] };
 
     try {
-        // Ejecutar generación visual y textual en paralelo
+        // Ejecutar en paralelo para velocidad
         const [mediaResponse, copyResponse] = await Promise.all([
             invokeAI('generate_visual', {
                 index,
@@ -139,18 +142,15 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
         ]);
 
         mediaUrl = mediaResponse.url;
-        // Si devuelve error explícito en la imagen
-        if (mediaResponse.error) {
-             console.error("Error visual:", mediaResponse.error);
-             mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`;
-        }
-
         isVideoResult = mediaResponse.isVideo;
         textData = copyResponse;
 
     } catch (e) {
-        console.error("Fallo generando variante:", e);
-        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}`;
+        console.error(`Fallo en variante ${index}:`, e);
+        // Fallback visual si falla la IA
+        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`;
+        
+        // Intentar recuperar texto aunque falle la imagen
         textData = await generateVariantCopy(state, settings, angle).catch(() => ({ copy: productData.name, hashtags: [] }));
     }
 
@@ -175,7 +175,6 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
 
   const variants: ContentVariant[] = [];
   
-  // Generación secuencial
   for (let i = 0; i < angles.length; i++) {
       const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);

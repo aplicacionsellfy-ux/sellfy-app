@@ -14,27 +14,37 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // 2. Validación de API Key
     const apiKey = Deno.env.get('API_KEY');
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: "Server Error: API_KEY missing" }), { 
+      console.error("Falta API_KEY en variables de entorno");
+      return new Response(JSON.stringify({ error: "Configuración del servidor incompleta (Falta API Key)." }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const { action, ...payload } = await req.json();
-
-    console.log(`[Sellfy API] Ejecutando acción: ${action}`);
+    
+    // 3. Parseo seguro del Body
+    let payload;
+    try {
+        payload = await req.json();
+    } catch (e) {
+        throw new Error("El cuerpo de la solicitud no es un JSON válido.");
+    }
+    
+    const { action, ...data } = payload;
+    console.log(`[Sellfy API] Acción solicitada: ${action}`);
 
     // --- A. Generar Texto (Copywriting) ---
     if (action === 'generate_copy') {
-        const { productData, platform, settings, angle } = payload;
+        const { productData, platform, settings, angle } = data;
         const prompt = `
-          ROLE: Social Media Copywriter for ${settings.industry}.
-          TASK: Write a caption for "${productData.name}".
+          ROLE: Expert Social Media Copywriter.
+          TASK: Write a spanish caption for "${productData.name}".
           CONTEXT: Platform: ${platform}. Angle: ${angle}. Tone: ${settings.tone}.
-          DETAILS: Benefit: ${productData.benefit}.
-          REQUIREMENTS: Spanish. AIDA framework. 3-5 hashtags. Emojis.
+          PRODUCT INFO: ${productData.benefit}.
+          OUTPUT: JSON with 'copy' (text) and 'hashtags' (array of strings).
         `;
 
         try {
@@ -55,16 +65,19 @@ Deno.serve(async (req: Request) => {
             const result = JSON.parse(response.text || '{"copy": "", "hashtags": []}');
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (e) {
-            console.error("Error copy:", e);
-            // Fallback seguro
-            return new Response(JSON.stringify({ copy: `${productData.name} - ${productData.benefit}`, hashtags: ["#sellfy"] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            console.error("Error generando copy:", e);
+            // Fallback silencioso
+            return new Response(JSON.stringify({ 
+                copy: `${productData.name} - ${productData.benefit} 🚀`, 
+                hashtags: ["#sellfy", "#promo"] 
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
     }
 
     // --- B. Regenerar Texto ---
     if (action === 'regenerate_copy') {
-        const { productName, platform, tone } = payload;
-        const prompt = `Rewrite caption for "${productName}". Platform: ${platform}. Tone: ${tone}. Spanish. Short.`;
+        const { productName, platform, tone } = data;
+        const prompt = `Reescribe un caption corto para "${productName}". Plataforma: ${platform}. Tono: ${tone}. Español.`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
@@ -74,65 +87,69 @@ Deno.serve(async (req: Request) => {
 
     // --- C. Generar Imagen Visual (Alta Fidelidad) ---
     if (action === 'generate_visual') {
-        const { angle, state, settings } = payload;
+        const { angle, state, settings } = data;
         const { productData, visualStyle } = state;
 
         const parts = [];
+        let hasImage = false;
 
-        // 1. IMPORTANTE: La imagen va PRIMERO en el array de partes.
-        // Esto le indica al modelo que la imagen es la fuente de verdad primaria.
+        // 1. Imagen Base (Reference Image)
         if (state.productData.baseImage) {
+            // Limpieza de base64 header si existe
             const matches = state.productData.baseImage.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
+                hasImage = true;
                 parts.push({
                     inlineData: {
-                        mimeType: matches[1],
-                        data: matches[2]
+                        mimeType: matches[1], // Ej: image/png
+                        data: matches[2]      // Base64 raw
                     }
                 });
             }
         }
 
-        // 2. Prompt estricto de edición
+        // 2. Prompt de Ingeniería para Fidelidad
         let promptText = "";
-        if (state.productData.baseImage) {
+        if (hasImage) {
            promptText = `
-             You are a professional product photo editor.
+             You are a Product Photographer doing post-production.
              
-             STRICT INSTRUCTION:
-             - **DO NOT CHANGE THE PRODUCT**. Use the input image as the absolute reference.
-             - Only change the background and lighting.
+             CRITICAL INSTRUCTION:
+             The image provided is the **Reference Product**. 
+             You must KEEP the product appearance exactly as it is. Do NOT hallucinate a new product.
              
-             SCENE:
-             - Style: ${visualStyle}.
-             - Brand Colors to use in background: ${settings.primaryColor} and ${settings.secondaryColor}.
-             - Mood: ${productData.benefit}.
-             - Angle: ${angle} (Camera angle relative to the product).
+             TASK:
+             Place this exact product in a new background context.
+             
+             BACKGROUND SETTINGS:
+             - Style: ${visualStyle}
+             - Lighting Colors: ${settings.primaryColor} and ${settings.secondaryColor}
+             - Environment: ${productData.benefit}
+             - Camera Angle: ${angle}
+             
+             Output: High resolution product photography.
            `;
         } else {
            promptText = `
-             Create a professional product photo for "${productData.name}".
+             Create a high-quality product photography for "${productData.name}".
              Style: ${visualStyle}.
              Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
              Context: ${productData.benefit}.
              Angle: ${angle}.
-             High quality, photorealistic, 4k.
+             Professional lighting, 4k resolution.
            `;
         }
         parts.push({ text: promptText });
 
         try {
-            // USAMOS GEMINI 2.5 FLASH IMAGE
-            // Este modelo respeta mucho mejor la imagen de referencia que el Gemini 3 Pro.
+            // Usamos gemini-2.5-flash-image (Nano Banana) para mejor coherencia visual
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image', 
                 contents: { parts: parts },
-                config: {
-                    // No usamos responseMimeType aquí porque nano banana no lo soporta bien
-                }
+                config: {} // Nano banana no soporta muchos configs avanzados, mejor dejar vacío
             });
 
-            // Buscar la parte de imagen en la respuesta (puede venir mezclada con texto)
+            // Extraer la imagen de la respuesta
             let b64 = null;
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
@@ -148,12 +165,15 @@ Deno.serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
                 });
             }
-            throw new Error("La IA no generó una imagen válida.");
+            throw new Error("El modelo no devolvió datos de imagen.");
+
         } catch (e) {
-            console.error("Image gen failed:", e);
+            console.error("Error generando imagen:", e);
+            // No fallamos la petición completa, devolvemos un placeholder y el error
             return new Response(JSON.stringify({ 
-                url: null, 
-                error: `Image Error: ${e.message}`
+                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=Error+Generando+Imagen`, 
+                isVideo: false,
+                error: e.message 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -162,74 +182,80 @@ Deno.serve(async (req: Request) => {
 
     // --- D. Animar Imagen (Video - Veo) ---
     if (action === 'animate_image') {
-        const { image } = payload; 
+        const { image } = data; 
         
         try {
             const matches = image.match(/^data:([^;]+);base64,(.+)$/);
-            if (!matches) throw new Error("Formato de imagen inválido");
+            if (!matches) throw new Error("Formato de imagen inválido para video");
 
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic product showcase, slow motion, professional lighting, 4k.",
+                prompt: "Cinematic pan, slow motion, professional commercial lighting, 4k.",
                 image: { 
                     imageBytes: matches[2], 
                     mimeType: matches[1] 
                 },
                 config: { 
                     numberOfVideos: 1,
-                    resolution: '720p', // Veo Fast suele ser mejor en 720p
+                    resolution: '720p',
                     aspectRatio: '9:16'
                 }
             });
+
+            console.log("Video operation started:", operation.name);
 
             return new Response(JSON.stringify({ operationName: operation.name }), {
                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         } catch (e) {
-            console.error("Video init failed:", e);
-            return new Response(JSON.stringify({ error: `Video Init Error: ${e.message}` }), {
+            console.error("Error iniciando video:", e);
+            // Devolvemos 200 con error JSON
+            return new Response(JSON.stringify({ error: `No se pudo iniciar el video: ${e.message}` }), {
                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
     }
 
-    // --- E. Consultar Estado Video (Polling) ---
+    // --- E. Consultar Estado Video (Polling Seguro) ---
     if (action === 'get_video_operation') {
-        const { operationName } = payload;
+        const { operationName } = data;
         
         if (!operationName) {
-             return new Response(JSON.stringify({ done: false, error: "Missing operationName" }), {
+             return new Response(JSON.stringify({ done: false, error: "Falta operationName" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
 
         try {
-            // CORRECCIÓN CLAVE: Usamos getVideosOperation pasando el objeto operation reconstruido
-            // Esto evita el error 500 si getOperation genérico falla.
-            const operation = await ai.operations.getVideosOperation({ 
-                operation: { name: operationName } 
-            });
+            // USAMOS getOperation (Genérico) en lugar de getVideosOperation para evitar errores de tipo en runtime
+            // Esto es mucho más seguro para polling.
+            const operation = await ai.operations.getOperation({ name: operationName });
             
             let videoUri = null;
             
+            // Verificamos si terminó
             if (operation.done) {
-                 // Estructura de respuesta de Veo
-                 const generatedVideo = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
+                 // La estructura de respuesta de Veo puede variar, buscamos el URI con cuidado
+                 const responseMetadata = operation.response || operation.result;
+                 const generatedVideo = responseMetadata?.generatedVideos?.[0];
                  const rawUri = generatedVideo?.video?.uri;
                  
                  if (rawUri) {
-                     // Adjuntar API Key es vital
+                     // Adjuntar API Key es OBLIGATORIO para descargar el video
                      videoUri = `${rawUri}&key=${apiKey}`;
+                 } else {
+                     console.warn("Operación terminada pero sin URI de video:", operation);
                  }
             }
 
-            return new Response(JSON.stringify({ done: operation.done, videoUri }), {
+            return new Response(JSON.stringify({ done: !!operation.done, videoUri }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
 
         } catch (e) {
-            console.error("Polling error:", e);
-            // Devolvemos 200 OK con done: false para que el cliente no crashee y siga intentando
+            console.error("Error en polling de video:", e);
+            // IMPORTANTE: Devolvemos 'done: false' en lugar de explotar.
+            // Esto permite que el frontend siga intentando un par de veces más.
             return new Response(JSON.stringify({ 
                 done: false, 
                 debugError: e.message 
@@ -239,16 +265,21 @@ Deno.serve(async (req: Request) => {
         }
     }
 
-    // Acción desconocida
-    return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { 
+    return new Response(JSON.stringify({ error: `Acción desconocida: ${action}` }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 
   } catch (error: any) {
-    // CATCH-ALL GLOBAL: Esto previene que la Edge Function devuelva 500 HTML
-    console.error("Global Error Handler:", error.message);
-    return new Response(JSON.stringify({ error: `System Error: ${error.message}` }), {
-      status: 200, 
+    // --- CATCH-ALL GLOBAL DE SEGURIDAD ---
+    // Atrapa cualquier error síncrono o asíncrono no manejado y devuelve JSON 200
+    // para evitar la pantalla de error 500 en el cliente.
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido en el servidor";
+    console.error("🔥 GLOBAL SERVER CRASH EVITED:", errorMessage);
+    
+    return new Response(JSON.stringify({ 
+        error: `Error interno del sistema: ${errorMessage}` 
+    }), {
+      status: 200, // Status 200 para que el cliente pueda leer el JSON de error
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
