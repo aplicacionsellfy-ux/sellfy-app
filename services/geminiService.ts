@@ -12,7 +12,6 @@ const invokeAI = async (action: string, payload: any, retries = 1) => {
 
     if (error) {
       console.error(`Edge Function Network Error (${action}):`, error);
-      // Si es un error de red, reintentamos una vez
       if (retries > 0) {
           console.log(`Reintentando ${action}...`);
           await new Promise(r => setTimeout(r, 2000));
@@ -21,7 +20,17 @@ const invokeAI = async (action: string, payload: any, retries = 1) => {
       throw new Error("El servidor de IA está tardando en responder.");
     }
 
-    // Si la función devuelve un error explícito en el JSON (Status 200 pero logical error)
+    // --- DEBUGGING: Ver prompt en consola del navegador ---
+    if (data && data.debugPrompt) {
+        console.groupCollapsed(`🔍 DEBUG PROMPT (${action})`);
+        console.log(data.debugPrompt);
+        console.groupEnd();
+    }
+    if (data && data.debugError) {
+        console.warn("⚠️ Backend Warning:", data.debugError);
+    }
+    // -----------------------------------------------------
+
     if (data && data.error) {
       console.warn(`API Logic Error (${action}):`, data.error);
       throw new Error(data.error);
@@ -29,7 +38,6 @@ const invokeAI = async (action: string, payload: any, retries = 1) => {
 
     return data;
   } catch (e: any) {
-      // Manejo final de excepción
       throw e;
   }
 };
@@ -97,7 +105,6 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
     const { operationName } = response;
     console.log(`Video iniciado (${operationName}).`);
 
-    // Veo puede tardar 1-2 minutos. Aumentamos intentos y tiempo de espera.
     let attempts = 0;
     const maxAttempts = 30; // 30 intentos
     const interval = 5000; // 5 segundos
@@ -107,7 +114,6 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
         attempts++;
         
         try {
-            // Consultar estado
             const status = await invokeAI('get_video_operation', { operationName });
             
             if (status.done) {
@@ -119,14 +125,12 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
                 }
             }
             
-            // Si el backend devuelve debugError (error manejado), solo logueamos
             if (status.debugError) {
-                console.log(`Polling wait (Backend handled error): ${status.debugError}`);
+                console.log(`Polling wait: ${status.debugError}`);
             }
 
         } catch (pollError: any) {
-            console.warn(`Polling network warning (intento ${attempts}):`, pollError);
-            // No lanzamos error aquí, seguimos intentando en el siguiente loop
+            console.warn(`Polling warning:`, pollError);
         }
         
         console.log(`⏳ Procesando video... ${attempts}/${maxAttempts}`);
@@ -168,12 +172,11 @@ const generateVariantContent = async (
             generateVariantCopy(state, settings, angle, plan)
         ]);
 
-        // Procesar respuesta de imagen
         if (mediaResponse.error) {
              console.warn(`⚠️ Error visual reportado: ${mediaResponse.error}`);
-             // Fallback local visual
              const primaryColor = settings.primaryColor.replace('#', '');
              const secondaryColor = settings.secondaryColor.replace('#', '');
+             // Usar fallback URL si existe, sino placeholder
              mediaUrl = mediaResponse.url || `https://placehold.co/1080x1350/${primaryColor}/${secondaryColor}?text=${encodeURIComponent(productData.name)}`;
         } else {
              mediaUrl = mediaResponse.url;
@@ -185,7 +188,6 @@ const generateVariantContent = async (
     } catch (e: any) {
         console.error(`❌ Fallo total en variante ${index}:`, e);
         
-        // Fallback completo de emergencia
         const primaryColor = settings.primaryColor.replace('#', '');
         const secondaryColor = settings.secondaryColor.replace('#', '');
         mediaUrl = `https://placehold.co/1080x1350/${primaryColor}/${secondaryColor}?text=${encodeURIComponent(productData.name)}`;
@@ -223,13 +225,11 @@ export const generateCampaign = async (
 
   const variants: ContentVariant[] = [];
   
-  // Generar variantes secuencialmente para evitar saturar la API
   for (let i = 0; i < angles.length; i++) {
       console.log(`📝 Generando variante ${i + 1}/${angles.length}: ${angles[i]}`);
       const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);
       
-      // Pequeña pausa entre variantes para dar respiro al servidor
       if (i < angles.length - 1) {
           await new Promise(r => setTimeout(r, 500));
       }

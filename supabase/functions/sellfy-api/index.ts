@@ -14,10 +14,11 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    console.log("🔥 [Sellfy API] Inicio de la función...");
+
     const apiKey = Deno.env.get('API_KEY');
     if (!apiKey) {
       console.error("❌ API_KEY no encontrada en variables de entorno");
-      // Devolvemos 200 con error JSON para que el frontend lo muestre bonito, no un 500 genérico
       return new Response(JSON.stringify({ error: "Falta API Key en el servidor (Supabase Secrets)." }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
@@ -27,16 +28,25 @@ Deno.serve(async (req: Request) => {
     
     let payload;
     try {
-        payload = await req.json();
+        // Leemos el texto primero para evitar errores de parseo silenciosos
+        const rawBody = await req.text();
+        console.log(`📦 Payload Size: ${(rawBody.length / 1024 / 1024).toFixed(2)} MB`);
+        
+        if (rawBody.length > 5.5 * 1024 * 1024) {
+             throw new Error("La imagen es demasiado grande para procesar (Límite 5MB). Intenta con una más pequeña.");
+        }
+        
+        payload = JSON.parse(rawBody);
     } catch (e) {
-        return new Response(JSON.stringify({ error: "JSON inválido en el body" }), { 
+        console.error("❌ Error parseando JSON o Payload muy grande:", e);
+        return new Response(JSON.stringify({ error: "Error de datos: " + e.message }), { 
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         });
     }
     
     const { action, plan = 'free', ...data } = payload;
-    console.log(`[Sellfy API] Action: ${action} | Plan: ${plan}`);
+    console.log(`⚡ Action: ${action} | Plan: ${plan}`);
 
     // --- A. GENERAR TEXTO (COPY) ---
     if (action === 'generate_copy') {
@@ -59,7 +69,6 @@ Deno.serve(async (req: Request) => {
         `;
 
         try {
-            // Usamos Gemini 3 Flash por ser el más rápido y eficiente para texto
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: prompt,
@@ -75,14 +84,12 @@ Deno.serve(async (req: Request) => {
                 }
             });
             
-            // Limpieza extra por si acaso el modelo devuelve markdown
             const cleanText = (response.text || '{}').replace(/```json/g, '').replace(/```/g, '').trim();
             const result = JSON.parse(cleanText);
             
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (e) {
             console.error("Error Copy:", e);
-            // Fallback en caso de error de IA
             return new Response(JSON.stringify({ 
               copy: `¡Descubre ${productData.name}! ✨\n\n${productData.benefit}\n\nConsíguelo ahora. 👇`,
               hashtags: ["#fyp", "#viral", "#nuevo"]
@@ -131,7 +138,7 @@ Deno.serve(async (req: Request) => {
 
         // 2. Construir Prompt según si hay imagen o no
         if (imageData) {
-            // PROMPT CRÍTICO PARA FIDELIDAD
+            // --- PROMPT QUE PUEDES VER EN LOGS ---
             promptText = `
               Role: Professional Product Photographer & Editor.
               
@@ -145,11 +152,14 @@ Deno.serve(async (req: Request) => {
               OUTPUT: A generic photorealistic background that matches the product perspective. High resolution.
             `;
             
+            console.log("📜 --- PROMPT USADO PARA IMAGEN ---");
+            console.log(promptText);
+            console.log("📜 ------------------------------");
+
             // Añadir imagen y texto al request (Multimodal)
             parts.push({ inlineData: { mimeType, data: imageData } });
             parts.push({ text: promptText });
         } else {
-            // Fallback: Generación pura (si el usuario no subió foto)
             promptText = `
               Create a professional product photography shot.
               Product Name: "${productData.name}".
@@ -159,16 +169,16 @@ Deno.serve(async (req: Request) => {
               Angle: ${angle}.
               Quality: Photorealistic, 4k, Commercial.
             `;
+            console.log("📜 --- PROMPT (SIN IMAGEN) ---");
+            console.log(promptText);
             parts.push({ text: promptText });
         }
 
         try {
-            // IMPORTANTE: Usamos 'gemini-2.5-flash-image' porque respeta la imagen de entrada (inpainting/compositing)
-            // 'imagen-3.0' a menudo "alucina" el producto.
+            // Usamos gemini-2.5-flash-image
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents: { parts: parts },
-                // No usamos responseMimeType aquí porque este modelo devuelve binarios inline
             });
 
             // 3. Extraer Imagen de la respuesta
@@ -185,20 +195,22 @@ Deno.serve(async (req: Request) => {
             if (b64) {
                 return new Response(JSON.stringify({ 
                     url: `data:image/png;base64,${b64}`,
-                    isVideo: false
+                    isVideo: false,
+                    debugPrompt: promptText // <--- DEVOLVEMOS EL PROMPT AL FRONTEND
                 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
             }
             
-            throw new Error("El modelo no devolvió datos de imagen.");
+            throw new Error("El modelo no devolvió datos de imagen. Posible bloqueo de seguridad.");
 
         } catch (e) {
             console.error("Image Gen Error:", e);
-            // Devolvemos la imagen original si falla la generación, para no romper la UI
             const fallbackUrl = productData.baseImage || `https://placehold.co/1080x1350/000000/FFF?text=${encodeURIComponent(productData.name)}`;
             return new Response(JSON.stringify({ 
                 url: fallbackUrl,
                 isVideo: false,
-                note: "Error generando imagen nueva. Mostrando original."
+                note: "Error generando imagen nueva. Mostrando original.",
+                debugError: e.message,
+                debugPrompt: promptText
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
     }
@@ -214,7 +226,6 @@ Deno.serve(async (req: Request) => {
 
             console.log("🎬 Iniciando generación de video con Veo...");
 
-            // Iniciar operación de video asíncrona
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
                 image: { imageBytes, mimeType },
@@ -222,11 +233,10 @@ Deno.serve(async (req: Request) => {
                 config: {
                     numberOfVideos: 1,
                     resolution: '720p',
-                    aspectRatio: '9:16' // Formato vertical para redes
+                    aspectRatio: '9:16'
                 }
             });
 
-            // Devolvemos el nombre de la operación para hacer polling
             return new Response(JSON.stringify({ operationName: operation.name }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -239,13 +249,12 @@ Deno.serve(async (req: Request) => {
         }
     }
 
-    // --- E. POLLING VIDEO (BLINDADO CONTRA 500) ---
+    // --- E. POLLING VIDEO ---
     if (action === 'get_video_operation') {
         const { operationName } = data;
         if (!operationName) return new Response(JSON.stringify({ error: "No operation name provided" }), { headers: corsHeaders });
 
         try {
-            // Consultamos el estado de la operación
             const operation = await ai.operations.getVideosOperation({ 
                 operation: { name: operationName } 
             });
@@ -255,10 +264,8 @@ Deno.serve(async (req: Request) => {
 
             if (operation.done) {
                 done = true;
-                // Intentamos sacar la URI del video de varios lugares posibles en la respuesta
                 const vid = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
                 if (vid?.video?.uri) {
-                    // Adjuntamos la API Key porque la URL de descarga la requiere
                     videoUri = `${vid.video.uri}&key=${apiKey}`;
                 }
             }
@@ -268,13 +275,8 @@ Deno.serve(async (req: Request) => {
             });
 
         } catch (e) {
-            // SI GOOGLE FALLA EN EL POLLING (ej. timeout o error temporal), NO LANZAMOS ERROR 500.
-            // Devolvemos done: false para que el frontend siga intentando.
             console.warn("Polling Check Error (Handled):", e.message);
-            return new Response(JSON.stringify({ 
-                done: false, 
-                debugError: e.message 
-            }), {
+            return new Response(JSON.stringify({ done: false, debugError: e.message }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
@@ -286,8 +288,6 @@ Deno.serve(async (req: Request) => {
 
   } catch (error: any) {
     console.error("CRITICAL SERVER ERROR:", error);
-    // IMPORTANTE: Devolvemos status 200 con un JSON de error.
-    // Esto evita que el cliente (React) reciba una excepción de red y pueda mostrar el mensaje de error amigablemente.
     return new Response(JSON.stringify({ error: "Server Error: " + error.message }), {
       status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
