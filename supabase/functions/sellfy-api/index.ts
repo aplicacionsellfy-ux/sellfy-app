@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // 1. Manejo de CORS
+  // Manejo de Preflight request (CORS)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -16,7 +16,9 @@ Deno.serve(async (req: Request) => {
   try {
     const apiKey = Deno.env.get('API_KEY');
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: "Falta API Key en el servidor." }), { 
+      console.error("❌ API_KEY no encontrada en variables de entorno");
+      // Devolvemos 200 con error JSON para que el frontend lo muestre bonito, no un 500 genérico
+      return new Response(JSON.stringify({ error: "Falta API Key en el servidor (Supabase Secrets)." }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
     }
@@ -27,23 +29,37 @@ Deno.serve(async (req: Request) => {
     try {
         payload = await req.json();
     } catch (e) {
-        return new Response(JSON.stringify({ error: "Invalid JSON body" }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: "JSON inválido en el body" }), { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
     }
     
-    const { action, ...data } = payload;
-    console.log(`[Sellfy API] Action: ${action}`);
+    const { action, plan = 'free', ...data } = payload;
+    console.log(`[Sellfy API] Action: ${action} | Plan: ${plan}`);
 
-    // --- A. Generar Texto (Copy) ---
+    // --- A. GENERAR TEXTO (COPY) ---
     if (action === 'generate_copy') {
         const { productData, platform, settings, angle } = data;
+        
         const prompt = `
-          ROLE: Expert Social Media Copywriter (Spanish).
-          TASK: Create a high-converting caption for "${productData.name}".
-          DETAILS: Platform=${platform}, Angle=${angle}, Tone=${settings.tone}, Benefit=${productData.benefit}.
-          OUTPUT: JSON { "copy": "string", "hashtags": ["string"] }.
+          Eres un experto copywriter de e-commerce.
+          Producto: "${productData.name}".
+          Beneficio Clave: "${productData.benefit}".
+          Audiencia: "${settings.targetAudience}".
+          Plataforma: ${platform}.
+          Tono: ${settings.tone}.
+          Ángulo Creativo: ${angle}.
+          
+          Tu tarea: Escribe un caption persuasivo usando el método AIDA.
+          Requisitos:
+          1. Incluye emojis relevantes.
+          2. Genera 5-7 hashtags estratégicos.
+          3. Responde ESTRICTAMENTE en JSON.
         `;
 
         try {
+            // Usamos Gemini 3 Flash por ser el más rápido y eficiente para texto
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: prompt,
@@ -58,95 +74,104 @@ Deno.serve(async (req: Request) => {
                     }
                 }
             });
-            const result = JSON.parse(response.text || '{"copy": "", "hashtags": []}');
+            
+            // Limpieza extra por si acaso el modelo devuelve markdown
+            const cleanText = (response.text || '{}').replace(/```json/g, '').replace(/```/g, '').trim();
+            const result = JSON.parse(cleanText);
+            
             return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (e) {
-            return new Response(JSON.stringify({ copy: productData.name, hashtags: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            console.error("Error Copy:", e);
+            // Fallback en caso de error de IA
+            return new Response(JSON.stringify({ 
+              copy: `¡Descubre ${productData.name}! ✨\n\n${productData.benefit}\n\nConsíguelo ahora. 👇`,
+              hashtags: ["#fyp", "#viral", "#nuevo"]
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
     }
 
-    // --- B. Regenerar Texto ---
+    // --- B. REGENERAR TEXTO ---
     if (action === 'regenerate_copy') {
         const { productName, platform, tone } = data;
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: `Rewrite caption for "${productName}" in Spanish. Platform: ${platform}. Tone: ${tone}. Keep it punchy.`,
-        });
-        return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: `Reescribe un caption corto y atractivo para "${productName}" en ${platform}. Tono: ${tone}.`,
+            });
+            return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } catch (e) {
+            return new Response(JSON.stringify({ text: "Error regenerando texto." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
     }
 
-    // --- C. Generar Imagen Visual (FIDELIDAD EXTREMA - GEMINI 2.5) ---
+    // --- C. EDITAR IMAGEN (FIDELIDAD EXTREMA) ---
     if (action === 'generate_visual') {
         const { angle, state, settings } = data;
         const { productData, visualStyle } = state;
 
-        const parts = [];
-        let hasImage = false;
+        console.log("🎨 Generando imagen con Gemini 2.5 Flash Image...");
 
-        // Validación y limpieza de Base64
-        if (state.productData.baseImage) {
+        // 1. Preparar Imagen Base
+        let imageData = null;
+        let mimeType = 'image/png';
+
+        if (productData.baseImage) {
             try {
-                // Soportar data URIs directas
-                const partsBase64 = state.productData.baseImage.split(',');
-                
-                if (partsBase64.length === 2) {
-                    const mimeMatch = partsBase64[0].match(/:(.*?);/);
-                    const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-                    const data64 = partsBase64[1];
-
-                    // Check de sanidad básico
-                    if (data64 && data64.length > 100) { 
-                        hasImage = true;
-                        parts.push({
-                            inlineData: {
-                                mimeType: mimeType, 
-                                data: data64
-                            }
-                        });
-                    }
+                const parts = productData.baseImage.split(',');
+                if (parts.length === 2) {
+                    const match = parts[0].match(/:(.*?);/);
+                    if (match) mimeType = match[1];
+                    imageData = parts[1];
                 }
-            } catch (err) {
-                console.error("Error parsing base64:", err);
-            }
+            } catch (e) { console.error("Error parseando base64", e); }
         }
 
+        const parts = [];
         let promptText = "";
-        if (hasImage) {
-           // Prompt ESPECÍFICO para que Gemini 2.5 respete la imagen
-           // "DO NOT MODIFY THE PRODUCT" es la clave
-           promptText = `
-             You are a professional product photographer editing a photo.
-             
-             INPUT IMAGE: This is the HERO product. 
-             CRITICAL RULE: Keep the product EXACTLY as it is. Do not redraw it. Do not change the logo or packaging.
-             
-             TASK: Place this exact product in a new environment.
-             STYLE: ${visualStyle}.
-             LIGHTING: ${settings.primaryColor} accents.
-             ANGLE: ${angle}.
-             OUTPUT: High quality, photorealistic, 4k.
-           `;
+
+        // 2. Construir Prompt según si hay imagen o no
+        if (imageData) {
+            // PROMPT CRÍTICO PARA FIDELIDAD
+            promptText = `
+              Role: Professional Product Photographer & Editor.
+              
+              INPUT IMAGE: The image provided is the HERO product.
+              STRICT RULE: DO NOT modify, warp, or redraw the product itself. Keep the logo, shape, and text of the product EXACTLY as is.
+              
+              TASK: Composite this product into a new environment.
+              STYLE: ${visualStyle}.
+              LIGHTING: Professional studio lighting with accents of ${settings.primaryColor}.
+              ANGLE: ${angle}.
+              OUTPUT: A generic photorealistic background that matches the product perspective. High resolution.
+            `;
+            
+            // Añadir imagen y texto al request (Multimodal)
+            parts.push({ inlineData: { mimeType, data: imageData } });
+            parts.push({ text: promptText });
         } else {
-           // Fallback si no hay imagen (Generación pura)
-           promptText = `
-             Create a professional product photo for "${productData.name}".
-             Style: ${visualStyle}.
-             Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
-             Context: ${productData.benefit}.
-             Angle: ${angle}.
-             High quality, photorealistic, 4k.
-           `;
+            // Fallback: Generación pura (si el usuario no subió foto)
+            promptText = `
+              Create a professional product photography shot.
+              Product Name: "${productData.name}".
+              Context: ${productData.benefit}.
+              Style: ${visualStyle}.
+              Colors: ${settings.primaryColor}.
+              Angle: ${angle}.
+              Quality: Photorealistic, 4k, Commercial.
+            `;
+            parts.push({ text: promptText });
         }
-        
-        parts.push({ text: promptText });
 
         try {
-            // Usamos gemini-2.5-flash-image porque es MULTIMODAL (entiende la imagen de entrada)
+            // IMPORTANTE: Usamos 'gemini-2.5-flash-image' porque respeta la imagen de entrada (inpainting/compositing)
+            // 'imagen-3.0' a menudo "alucina" el producto.
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image', 
+                model: 'gemini-2.5-flash-image',
                 contents: { parts: parts },
+                // No usamos responseMimeType aquí porque este modelo devuelve binarios inline
             });
 
+            // 3. Extraer Imagen de la respuesta
             let b64 = null;
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
@@ -158,77 +183,69 @@ Deno.serve(async (req: Request) => {
             }
 
             if (b64) {
-                return new Response(JSON.stringify({ url: `data:image/png;base64,${b64}`, isVideo: false }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                });
+                return new Response(JSON.stringify({ 
+                    url: `data:image/png;base64,${b64}`,
+                    isVideo: false
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
             }
             
-            throw new Error("El modelo no generó imagen visual.");
+            throw new Error("El modelo no devolvió datos de imagen.");
 
         } catch (e) {
             console.error("Image Gen Error:", e);
+            // Devolvemos la imagen original si falla la generación, para no romper la UI
+            const fallbackUrl = productData.baseImage || `https://placehold.co/1080x1350/000000/FFF?text=${encodeURIComponent(productData.name)}`;
             return new Response(JSON.stringify({ 
-                error: "Fallo en generación de imagen: " + e.message,
-                // Placeholder de error visual
-                url: `https://placehold.co/1080x1350/1e293b/ffffff?text=Error+Generando` 
-            }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+                url: fallbackUrl,
+                isVideo: false,
+                note: "Error generando imagen nueva. Mostrando original."
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
     }
 
-    // --- D. Animar Imagen (Video - VEO 3.1) ---
+    // --- D. ANIMAR IMAGEN (VEO 3.1) ---
     if (action === 'animate_image') {
-        const { image } = data; 
+        const { image } = data;
         
         try {
-            const partsBase64 = image.split(',');
-            if (partsBase64.length !== 2) throw new Error("Formato de imagen inválido");
-            
-            const mimeMatch = partsBase64[0].match(/:(.*?);/);
-            const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-            const data64 = partsBase64[1];
+            const parts = image.split(',');
+            const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
+            const imageBytes = parts[1];
 
-            // Iniciar generación de video con Veo
+            console.log("🎬 Iniciando generación de video con Veo...");
+
+            // Iniciar operación de video asíncrona
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic commercial, slow motion, 4k, professional lighting.",
-                image: { 
-                    imageBytes: data64, 
-                    mimeType: mimeType 
-                },
-                config: { 
+                image: { imageBytes, mimeType },
+                prompt: "Cinematic slow motion product reveal, professional lighting, 4k resolution, smooth camera movement.",
+                config: {
                     numberOfVideos: 1,
                     resolution: '720p',
-                    aspectRatio: '9:16'
+                    aspectRatio: '9:16' // Formato vertical para redes
                 }
             });
 
+            // Devolvemos el nombre de la operación para hacer polling
             return new Response(JSON.stringify({ operationName: operation.name }), {
-                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
 
         } catch (e) {
-            console.error("Video Init Error:", e);
-            return new Response(JSON.stringify({ error: e.message }), {
-                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            console.error("Veo Init Error:", e);
+            return new Response(JSON.stringify({ error: "Error iniciando video: " + e.message }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
     }
 
-    // --- E. Polling Video (BLINDADO CONTRA 500) ---
+    // --- E. POLLING VIDEO (BLINDADO CONTRA 500) ---
     if (action === 'get_video_operation') {
         const { operationName } = data;
-        
-        if (!operationName) {
-             return new Response(JSON.stringify({ done: false, error: "Missing operationName" }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        }
+        if (!operationName) return new Response(JSON.stringify({ error: "No operation name provided" }), { headers: corsHeaders });
 
         try {
-            // Usamos getVideosOperation específico para Veo
-            // IMPORTANTÍSIMO: Envolvemos en try/catch para que si falla Google, NO falle nuestro servidor
+            // Consultamos el estado de la operación
             const operation = await ai.operations.getVideosOperation({ 
                 operation: { name: operationName } 
             });
@@ -238,11 +255,11 @@ Deno.serve(async (req: Request) => {
 
             if (operation.done) {
                 done = true;
-                const generatedVideo = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
-                const rawUri = generatedVideo?.video?.uri;
-                
-                if (rawUri) {
-                    videoUri = `${rawUri}&key=${apiKey}`;
+                // Intentamos sacar la URI del video de varios lugares posibles en la respuesta
+                const vid = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
+                if (vid?.video?.uri) {
+                    // Adjuntamos la API Key porque la URL de descarga la requiere
+                    videoUri = `${vid.video.uri}&key=${apiKey}`;
                 }
             }
 
@@ -251,25 +268,26 @@ Deno.serve(async (req: Request) => {
             });
 
         } catch (e) {
-            console.error("Polling Exception (Handled):", e);
-            // Si hay un error al consultar el estado (ej. 404 not found temporal),
-            // devolvemos done: false para que el cliente siga esperando en vez de explotar con un 500.
+            // SI GOOGLE FALLA EN EL POLLING (ej. timeout o error temporal), NO LANZAMOS ERROR 500.
+            // Devolvemos done: false para que el frontend siga intentando.
+            console.warn("Polling Check Error (Handled):", e.message);
             return new Response(JSON.stringify({ 
                 done: false, 
-                debugError: "Polling wait..." 
+                debugError: e.message 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
     }
 
-    return new Response(JSON.stringify({ error: `Unknown action` }), { 
+    return new Response(JSON.stringify({ error: "Acción desconocida" }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 
   } catch (error: any) {
     console.error("CRITICAL SERVER ERROR:", error);
-    // Devolvemos 200 con JSON de error para evitar la pantalla de la muerte en el cliente
+    // IMPORTANTE: Devolvemos status 200 con un JSON de error.
+    // Esto evita que el cliente (React) reciba una excepción de red y pueda mostrar el mensaje de error amigablemente.
     return new Response(JSON.stringify({ error: "Server Error: " + error.message }), {
       status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
