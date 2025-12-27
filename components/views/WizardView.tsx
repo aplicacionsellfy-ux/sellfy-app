@@ -157,9 +157,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
                             // También comprimimos la imagen que viene del celular
                             const reader = new FileReader();
                             reader.onloadend = () => {
-                                // Reusamos la lógica de compresión simulando un evento si es necesario, 
-                                // pero por simplicidad aquí asumimos que el mobile upload ya maneja tamaños razonables
-                                // o implementamos una compresión rápida:
                                 const img = new Image();
                                 img.onload = () => {
                                     const canvas = document.createElement('canvas');
@@ -269,7 +266,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
           </div>
       )}
 
-      {/* Steps 1-3 ... (Same as before, abbreviated for clarity) */}
       {state.step === 1 && (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8"><h2 className="text-3xl font-bold text-white tracking-tight mb-2">¿Qué vamos a crear?</h2><p className="text-slate-500">Selecciona el tipo de contenido para hoy</p></div>
@@ -295,29 +291,16 @@ export const WizardView: React.FC<WizardViewProps> = ({
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-white tracking-tight mb-2">Detalles del Producto</h2>
-            <p className="text-slate-500">Nuestra IA de Visión analizará esto para máxima fidelidad</p>
+            <p className="text-slate-500">Sube tu foto PRIMERO. La IA usará el texto solo para crear el fondo.</p>
           </div>
 
           <div className="bg-white/5 backdrop-blur-lg p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl">
+            
+            {/* SECCIÓN IMAGEN MOVIDA ARRIBA */}
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Nombre del Producto</label>
-              <input type="text" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" value={state.productData.name} onChange={(e) => updateProductData('name', e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Descripción del Producto</label>
-              <textarea className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none" value={state.productData.description} onChange={(e) => updateProductData('description', e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Beneficio Principal</label>
-              <textarea className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none" value={state.productData.benefit} onChange={(e) => updateProductData('benefit', e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-4 pt-2">
-                <div><label className="flex items-center gap-2 text-xs font-bold text-indigo-400 mb-2 uppercase tracking-wide"><Tag size={12} /> Oferta / Descuento</label><input type="text" placeholder="Ej: 20% OFF" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" value={state.productData.promoDetails || ''} onChange={(e) => updateProductData('promoDetails', e.target.value)} /></div>
-                <div><label className="flex items-center gap-2 text-xs font-bold text-emerald-400 mb-2 uppercase tracking-wide"><Type size={12} /> Texto Extra / Precio</label><input type="text" placeholder="Ej: Solo hoy $19.99" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all" value={state.productData.price || ''} onChange={(e) => updateProductData('price', e.target.value)} /></div>
-            </div>
-
-            <div className="pt-2">
-              <label className="block text-xs font-bold text-slate-400 mb-4 uppercase tracking-wide">Foto de referencia</label>
+              <label className="block text-xs font-bold text-slate-400 mb-4 uppercase tracking-wide">
+                1. Foto de referencia (LA FUENTE DE VERDAD)
+              </label>
               <div className="flex bg-slate-900/50 p-1 rounded-xl mb-4 border border-white/5 w-fit">
                 <button onClick={() => setUploadMethod('desktop')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'desktop' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}><Monitor size={14} /> Desktop</button>
                 <button onClick={() => initMobileUpload()} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${uploadMethod === 'mobile' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}><Smartphone size={14} /> Celular / QR</button>
@@ -346,6 +329,30 @@ export const WizardView: React.FC<WizardViewProps> = ({
                   </div>
               )}
             </div>
+
+            {/* SECCIÓN DE TEXTOS DEBAJO */}
+            <div className="pt-4 border-t border-white/5">
+                <p className="text-xs text-indigo-400 font-bold mb-4 uppercase tracking-wide">2. Contexto para el Copy & Fondo</p>
+                <div className="space-y-4">
+                    <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Nombre del Producto</label>
+                    <input type="text" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 focus:border-transparent outline-none transition-all" value={state.productData.name} onChange={(e) => updateProductData('name', e.target.value)} />
+                    </div>
+                    <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Descripción del Producto</label>
+                    <textarea className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none" value={state.productData.description} onChange={(e) => updateProductData('description', e.target.value)} />
+                    </div>
+                    <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Beneficio Principal</label>
+                    <textarea className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none h-20 resize-none" value={state.productData.benefit} onChange={(e) => updateProductData('benefit', e.target.value)} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div><label className="flex items-center gap-2 text-xs font-bold text-indigo-400 mb-2 uppercase tracking-wide"><Tag size={12} /> Oferta / Descuento</label><input type="text" placeholder="Ej: 20% OFF" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all" value={state.productData.promoDetails || ''} onChange={(e) => updateProductData('promoDetails', e.target.value)} /></div>
+                        <div><label className="flex items-center gap-2 text-xs font-bold text-emerald-400 mb-2 uppercase tracking-wide"><Type size={12} /> Texto Extra / Precio</label><input type="text" placeholder="Ej: Solo hoy $19.99" className="w-full p-4 bg-slate-900/50 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all" value={state.productData.price || ''} onChange={(e) => updateProductData('price', e.target.value)} /></div>
+                    </div>
+                </div>
+            </div>
+
           </div>
         </div>
       )}
@@ -410,7 +417,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                     (state.step === 1 && !state.contentType) || 
                     (state.step === 2 && !state.platform) || 
                     (state.step === 3 && !state.visualStyle) ||
-                    (state.step === 4 && (!state.productData.name || !state.productData.description || (!state.productData.baseImage && !state.productData.description))) // BaseImage is optional but good check
+                    (state.step === 4 && (!state.productData.name || !state.productData.description || (!state.productData.baseImage && !state.productData.description)))
                 }
                 className={`
                     flex-1 rounded-xl font-bold text-white text-lg shadow-lg flex items-center justify-center gap-2 transition-all relative overflow-hidden

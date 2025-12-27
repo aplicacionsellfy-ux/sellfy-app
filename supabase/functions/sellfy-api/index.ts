@@ -121,21 +121,23 @@ Deno.serve(async (req: Request) => {
         let promptText = "";
 
         if (imageData) {
-            // PROMPT ESTRICTO PARA PRESERVACIÓN DE PRODUCTO
-            // Le decimos al modelo que la imagen input es la verdad absoluta.
+            // PROMPT ESTRICTO PARA EDICIÓN DE FONDO (PRESERVANDO OBJETO)
             promptText = `
-              ACT AS A PHOTO EDITOR. DO NOT GENERATE A NEW PRODUCT.
+              TASK: Product Photography Post-Processing.
               
-              INPUT IMAGE: This contains the specific product "${productData.name}" that MUST be preserved exactly as shown.
+              INSTRUCTIONS:
+              1. DETECT the main product object in the input image. 
+              2. PRESERVE the product pixels exactly. Do NOT redraw, generate, or alter the product itself.
+              3. REMOVE the existing background entirely.
+              4. GENERATE a new professional background behind the product.
               
-              YOUR TASK:
-              1. KEEP the product from the input image EXACTLY as is. Do not redraw it. Do not change its text, logos, or shape.
-              2. CHANGE ONLY THE BACKGROUND.
-              3. The new background should be: ${visualStyle} style.
-              4. Environment/Setting: ${angle} (Apply this only to the background placement, NOT to the product rotation).
-              5. Use professional lighting colors: ${settings.primaryColor}.
+              BACKGROUND SPECS:
+              - Style: ${visualStyle}.
+              - Setting context (for background only): ${angle}.
+              - Brand Colors for Lighting/Props: ${settings.primaryColor}.
+              - Product Context (for mood only): "${productData.name} - ${productData.description}".
               
-              OUTPUT: The original product placed naturally in the new background. High fidelity.
+              OUTPUT: The EXACT original product cutout placed on the new background.
             `;
             
             parts.push({ inlineData: { mimeType, data: imageData } });
@@ -143,7 +145,8 @@ Deno.serve(async (req: Request) => {
         } else {
             // Fallback si no hay imagen (Generación desde cero)
             promptText = `
-              Create a professional product shot of: ${productData.name}.
+              Create a professional product shot.
+              Subject: ${productData.name}.
               Context: ${productData.benefit}.
               Style: ${visualStyle}.
               Setting: ${angle}.
