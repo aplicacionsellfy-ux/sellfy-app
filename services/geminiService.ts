@@ -5,20 +5,16 @@ import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier
 // --- HELPER: Invocador Seguro ---
 
 const invokeAI = async (action: string, payload: any) => {
-  // Llama a la Edge Function 'sellfy-api' desplegada en Supabase
   const { data, error } = await supabase.functions.invoke('sellfy-api', {
     body: { action, ...payload }
   });
 
   if (error) {
     console.error(`Edge Function Network Error (${action}):`, error);
-    // Si ocurre un error de red real (Edge Function crasheada o timeout de red)
-    throw new Error("El servidor de IA está ocupado. Por favor intenta de nuevo en unos segundos.");
+    throw new Error("El servidor de IA no responde. Intenta de nuevo.");
   }
 
-  // Si la función ejecutó pero devolvió un error lógico
   if (data && data.error) {
-    // Loguear pero lanzar error limpio
     console.warn(`API Error (${action}):`, data.error);
     throw new Error(data.error);
   }
@@ -28,7 +24,6 @@ const invokeAI = async (action: string, payload: any) => {
 
 // --- GENERADORES ---
 
-// 1. Generar Textos (Copy)
 export const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   try {
     const result = await invokeAI('generate_copy', {
@@ -39,7 +34,7 @@ export const generateVariantCopy = async (state: WizardState, settings: Business
     });
     return result;
   } catch (error) {
-    console.warn("Usando fallback de texto local:", error);
+    console.warn("Fallback local:", error);
     return { 
       copy: `${state.productData.name} - ${state.productData.benefit} 🔥`, 
       hashtags: ["#sellfy"] 
@@ -47,14 +42,9 @@ export const generateVariantCopy = async (state: WizardState, settings: Business
   }
 };
 
-// 2. Regenerar solo texto
 export const regenerateCopyOnly = async (productName: string, platform: string, tone: string): Promise<string> => {
   try {
-    const { text } = await invokeAI('regenerate_copy', {
-      productName,
-      platform,
-      tone
-    });
+    const { text } = await invokeAI('regenerate_copy', { productName, platform, tone });
     return text;
   } catch (e: any) {
     return "Error regenerando texto.";
@@ -66,7 +56,6 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
   try {
     console.log("🎥 Solicitando video a Veo...");
     
-    // Paso 1: Iniciar operación
     const response = await invokeAI('animate_image', {
       image: imageBase64
     });
@@ -76,40 +65,37 @@ export const animateImageWithVeo = async (imageBase64: string): Promise<string |
     }
     
     const { operationName } = response;
-    console.log(`Video iniciado (${operationName}). Esperando renderizado...`);
+    console.log(`Video iniciado (${operationName}).`);
 
-    // Paso 2: Polling (Preguntar estado)
-    // Aumentamos los intentos porque Veo puede tardar 1-2 minutos
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutos aprox (5s * 60)
+    const maxAttempts = 40; // ~3.5 min
     
     while (attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 5000)); // Esperar 5s
+        await new Promise(r => setTimeout(r, 5000));
         attempts++;
         
         try {
             const status = await invokeAI('get_video_operation', { operationName });
             
+            // Si el servidor reportó un error interno en el polling, lo mostramos
+            if (status.debugError) {
+                console.warn(`[Polling Server Error - Intento ${attempts}]:`, status.debugError);
+            }
+
             if (status.done) {
                 if (status.videoUri) {
-                    console.log("¡Video listo!");
                     return status.videoUri;
                 } else {
                     console.error("Video marcado como listo pero sin URL", status);
                     throw new Error("Error recuperando el archivo de video.");
                 }
             }
-            // Si devuelve done: false, simplemente seguimos esperando
-            
         } catch (pollError) {
-            // Si el polling falla (red, etc), lo ignoramos y seguimos intentando
-            console.warn(`Polling warning (intento ${attempts}):`, pollError);
+            console.warn(`Network Polling warning (intento ${attempts}):`, pollError);
         }
-        
-        console.log(`Renderizando video... ${Math.round((attempts/maxAttempts)*100)}%`);
     }
 
-    throw new Error("El video está tardando demasiado. Intenta más tarde.");
+    throw new Error("El video está tardando demasiado en procesarse.");
 
   } catch (e: any) {
     console.error("Animation Error:", e);
@@ -141,7 +127,6 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
         ]);
 
         mediaUrl = mediaResponse.url;
-        // Si hay error explícito en la respuesta de imagen
         if (mediaResponse.error) {
              console.warn("Error visual detectado:", mediaResponse.error);
              mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`;
@@ -152,7 +137,7 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
 
     } catch (e) {
         console.error(`Fallo total en variante ${index}:`, e);
-        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=Error+Generando`;
+        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=Error`;
         textData = { copy: productData.name, hashtags: [] };
     }
 
@@ -172,8 +157,6 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
   const angles = isVideo 
       ? ["Dynamic Reveal", "Lifestyle Usage", "Cinematic Mood", "Product Details"] 
       : ["Hero Shot (Centered)", "Lifestyle Context", "Creative Angle", "Close-up Detail"];
-
-  console.log(`🚀 Iniciando campaña...`);
 
   const variants: ContentVariant[] = [];
   

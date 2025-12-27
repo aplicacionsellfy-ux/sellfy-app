@@ -8,7 +8,6 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // 1. Manejo de CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -23,7 +22,6 @@ Deno.serve(async (req: Request) => {
 
     const ai = new GoogleGenAI({ apiKey });
     
-    // Parseo seguro del body
     let payload;
     try {
         payload = await req.json();
@@ -38,11 +36,10 @@ Deno.serve(async (req: Request) => {
     if (action === 'generate_copy') {
         const { productData, platform, settings, angle } = data;
         const prompt = `
-          ROLE: Social Media Expert.
-          TASK: Write a caption for "${productData.name}".
-          PLATFORM: ${platform}. ANGLE: ${angle}. TONE: ${settings.tone}.
-          BENEFIT: ${productData.benefit}.
-          OUTPUT: JSON with 'copy' and 'hashtags'. Spanish.
+          ROLE: Expert Social Media Copywriter (Spanish).
+          TASK: Create a high-converting caption for "${productData.name}".
+          DETAILS: Platform=${platform}, Angle=${angle}, Tone=${settings.tone}, Benefit=${productData.benefit}.
+          OUTPUT: JSON { "copy": "string", "hashtags": ["string"] }.
         `;
 
         try {
@@ -72,12 +69,12 @@ Deno.serve(async (req: Request) => {
         const { productName, platform, tone } = data;
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Rewrite caption for "${productName}". Platform: ${platform}. Tone: ${tone}. Spanish.`,
+            contents: `Rewrite caption for "${productName}" in Spanish. Platform: ${platform}. Tone: ${tone}. Keep it punchy.`,
         });
         return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- C. Generar Imagen Visual (FIDELIDAD EXTREMA) ---
+    // --- C. Generar Imagen Visual (FIDELIDAD MEJORADA) ---
     if (action === 'generate_visual') {
         const { angle, state, settings } = data;
         const { productData, visualStyle } = state;
@@ -85,44 +82,42 @@ Deno.serve(async (req: Request) => {
         const parts = [];
         let hasImage = false;
 
-        // 1. Procesar Imagen Base (Reference Image)
         if (state.productData.baseImage) {
             try {
-                // Limpieza agresiva del base64 para evitar corrupción
-                const rawBase64 = state.productData.baseImage;
-                // Extraer solo la data, quitando el header (data:image/xyz;base64,)
-                const matches = rawBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-                
-                if (matches && matches.length === 3) {
-                    hasImage = true;
-                    parts.push({
-                        inlineData: {
-                            mimeType: matches[1], 
-                            data: matches[2] // La data limpia
-                        }
-                    });
+                // Parsing robusto de Base64 (split por coma es más seguro que regex complejo)
+                const partsBase64 = state.productData.baseImage.split(',');
+                if (partsBase64.length === 2) {
+                    const mimeMatch = partsBase64[0].match(/:(.*?);/);
+                    const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+                    const data64 = partsBase64[1];
+
+                    if (data64) {
+                        hasImage = true;
+                        parts.push({
+                            inlineData: {
+                                mimeType: mimeType, 
+                                data: data64
+                            }
+                        });
+                    }
                 }
             } catch (err) {
-                console.error("Error procesando imagen base64:", err);
+                console.error("Error parsing base64:", err);
             }
         }
 
-        // 2. Prompt de "Composición" en lugar de "Generación"
         let promptText = "";
         if (hasImage) {
-           // Estrategia: Instruir a la IA que esto es una edición/composición, no un dibujo nuevo.
+           // Prompt de Edición Estricto para evitar alucinaciones
            promptText = `
-             TASK: Product Photography Compositing.
-             INSTRUCTION: Retain the input product image EXACTLY as is. Do not alter the product's shape, logo, or details.
-             ACTION: Place the product in a new environment.
-             
-             ENVIRONMENT SETTINGS:
-             - Style: ${visualStyle}.
-             - Colors: Use ${settings.primaryColor} and ${settings.secondaryColor} for lighting/background accents.
-             - Context: ${productData.benefit}.
-             - Angle: Match the camera angle of the product (${angle}).
-             
-             QUALITY: Photorealistic, 4k, professional commercial photography.
+             You are a professional product photo editor.
+             INPUT: The image provided is the REAL PRODUCT.
+             TASK: Keep the product EXACTLY as it is (pixels, logo, shape, color). Do not redraw it.
+             ACTION: Change the background to a "${visualStyle}" style.
+             LIGHTING: Use ${settings.primaryColor} and ${settings.secondaryColor} hints.
+             CONTEXT: ${productData.benefit}.
+             ANGLE: ${angle}.
+             OUTPUT: A photorealistic product shot.
            `;
         } else {
            promptText = `
@@ -131,24 +126,18 @@ Deno.serve(async (req: Request) => {
              Colors: ${settings.primaryColor}, ${settings.secondaryColor}.
              Context: ${productData.benefit}.
              Angle: ${angle}.
-             High quality, photorealistic.
+             High quality, photorealistic, 4k.
            `;
         }
         
-        // El texto va DESPUÉS de la imagen para que la imagen sea el contexto principal
         parts.push({ text: promptText });
 
         try {
-            // Usamos gemini-2.5-flash-image que es específico para edición/generación de imágenes
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image', 
                 contents: { parts: parts },
-                config: {
-                    // No usamos schemas ni mimetypes JSON para imágenes, es raw text + inlineData
-                }
             });
 
-            // Buscar la parte de imagen en la respuesta
             let b64 = null;
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
@@ -164,11 +153,10 @@ Deno.serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
                 });
             }
-            throw new Error("No se generó imagen.");
+            throw new Error("No se generó imagen en la respuesta.");
 
         } catch (e) {
             console.error("Image Gen Error:", e);
-            // Devolver placeholder en vez de fallar
             return new Response(JSON.stringify({ 
                 url: `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`, 
                 isVideo: false,
@@ -184,16 +172,19 @@ Deno.serve(async (req: Request) => {
         const { image } = data; 
         
         try {
-            const matches = image.match(/^data:([^;]+);base64,(.+)$/);
-            if (!matches) throw new Error("Imagen inválida");
+            const partsBase64 = image.split(',');
+            if (partsBase64.length !== 2) throw new Error("Formato de imagen inválido");
+            
+            const mimeMatch = partsBase64[0].match(/:(.*?);/);
+            const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+            const data64 = partsBase64[1];
 
-            // Paso 1: Iniciar operación de video
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
-                prompt: "Cinematic product showcase, slow motion, 4k commercial.",
+                prompt: "Cinematic commercial, slow motion, 4k, professional lighting.",
                 image: { 
-                    imageBytes: matches[2], 
-                    mimeType: matches[1] 
+                    imageBytes: data64, 
+                    mimeType: mimeType 
                 },
                 config: { 
                     numberOfVideos: 1,
@@ -202,7 +193,6 @@ Deno.serve(async (req: Request) => {
                 }
             });
 
-            // Veo devuelve un nombre de operación tipo "projects/.../operations/..."
             return new Response(JSON.stringify({ operationName: operation.name }), {
                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -215,29 +205,28 @@ Deno.serve(async (req: Request) => {
         }
     }
 
-    // --- E. Polling Video (BLINDADO) ---
+    // --- E. Polling Video (CORREGIDO) ---
     if (action === 'get_video_operation') {
         const { operationName } = data;
         
         if (!operationName) {
-             return new Response(JSON.stringify({ done: false, error: "No operationName" }), {
+             return new Response(JSON.stringify({ done: false, error: "Missing operationName" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
 
         try {
-            // Usamos getOperation genérico. 
-            // IMPORTANTE: Envolvemos en try/catch específico para esta llamada.
-            // Si la operación no está lista o falla internamente en Google, no queremos que la Edge Function muera.
-            const operation = await ai.operations.getOperation({ name: operationName });
+            // USAMOS getVideosOperation ESPECÍFICO PARA VEO
+            // Pasamos el objeto con la propiedad 'name' correctamente según el SDK
+            const operation = await ai.operations.getVideosOperation({ 
+                operation: { name: operationName } 
+            });
             
             let videoUri = null;
             let done = false;
 
-            // Verificar status
             if (operation.done) {
                 done = true;
-                // Buscar URI en multiples lugares posibles según versión de API
                 const generatedVideo = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
                 const rawUri = generatedVideo?.video?.uri;
                 
@@ -251,28 +240,27 @@ Deno.serve(async (req: Request) => {
             });
 
         } catch (e) {
-            console.error("Polling Error (Ignored):", e);
-            // Si falla el polling, NO devolvemos error 500.
-            // Devolvemos done: false para que el cliente siga esperando.
-            // Muchas veces Google devuelve 404 temporalmente mientras procesa.
+            console.error("Polling Exception:", e);
+            // Devolvemos el error en debugInfo para que el cliente sepa qué pasó
+            // Pero mantenemos done: false para que siga reintentando si es un error transitorio
             return new Response(JSON.stringify({ 
                 done: false, 
-                debugInfo: "Polling retry" 
+                debugError: e.message,
+                debugStack: e.stack 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
     }
 
-    return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { 
+    return new Response(JSON.stringify({ error: `Unknown action` }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
 
   } catch (error: any) {
-    // Catch-all absoluto para evitar 500 HTML standard
-    console.error("CRITICAL SERVER ERROR:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-      status: 200, // Status 200 para que el cliente pueda leer el JSON
+    console.error("GLOBAL SERVER ERROR:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
