@@ -71,17 +71,58 @@ export const WizardView: React.FC<WizardViewProps> = ({
     }));
   };
 
+  // --- FUNCIÓN DE COMPRESIÓN DE IMAGEN ---
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 4 * 1024 * 1024) {
-        addToast("La imagen debe pesar menos de 4MB", "error");
+      // 1. Validación inicial
+      if (file.size > 15 * 1024 * 1024) { // 15MB límite absoluto crudo
+        addToast("La imagen es demasiado pesada. Usa una menor a 15MB.", "error");
         return;
       }
+
+      addToast("Optimizando imagen para IA...", "info");
+
       const reader = new FileReader();
-      reader.onloadend = () => {
-        updateProductData('baseImage', reader.result as string);
-        addToast("Imagen cargada. Nuestra IA mantendrá la fidelidad de tu producto.", "success");
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          // 2. Redimensionar y Comprimir en Canvas
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          // Límite de 1280px es suficiente para Gemini y evita payloads gigantes
+          const MAX_SIZE = 1280; 
+
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // 3. Exportar como JPEG con calidad 0.8 (Reduce tamaño ~80%)
+            const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+            
+            console.log(`📉 Imagen comprimida: ${Math.round(optimizedBase64.length / 1024)}KB`);
+            updateProductData('baseImage', optimizedBase64);
+            addToast("Imagen lista.", "success");
+          }
+        };
+        img.src = event.target?.result as string;
       };
       reader.readAsDataURL(file);
     }
@@ -113,9 +154,24 @@ export const WizardView: React.FC<WizardViewProps> = ({
                         try {
                             const res = await fetch(payload.new.image_url);
                             const blob = await res.blob();
+                            // También comprimimos la imagen que viene del celular
                             const reader = new FileReader();
                             reader.onloadend = () => {
-                                updateProductData('baseImage', reader.result as string);
+                                // Reusamos la lógica de compresión simulando un evento si es necesario, 
+                                // pero por simplicidad aquí asumimos que el mobile upload ya maneja tamaños razonables
+                                // o implementamos una compresión rápida:
+                                const img = new Image();
+                                img.onload = () => {
+                                    const canvas = document.createElement('canvas');
+                                    const MAX = 1280;
+                                    let w = img.width, h = img.height;
+                                    if (w > h) { if (w > MAX) { h *= MAX/w; w = MAX; } }
+                                    else { if (h > MAX) { w *= MAX/h; h = MAX; } }
+                                    canvas.width = w; canvas.height = h;
+                                    canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+                                    updateProductData('baseImage', canvas.toDataURL('image/jpeg', 0.8));
+                                };
+                                img.src = reader.result as string;
                             };
                             reader.readAsDataURL(blob);
                         } catch(e) {
@@ -143,15 +199,19 @@ export const WizardView: React.FC<WizardViewProps> = ({
     nextStep(); 
     
     try {
+      console.log("🚀 Enviando petición al servidor...");
       const generated = await generateCampaign(state, businessSettings, subscription.plan);
       setResult(generated);
       onCampaignCreated(generated); 
       onDecrementCredit(currentCost); 
       setState(prev => ({ ...prev, step: 6 })); 
       addToast("¡Contenido generado!", "success");
-    } catch (e) {
+      
+      console.log("✅ Mira la consola arriba para ver 'DEBUG PROMPT' y leer lo que usó Gemini.");
+      
+    } catch (e: any) {
       console.error(e);
-      addToast("Error generando contenido. Intenta de nuevo.", "error");
+      addToast("Error generando contenido. Revisa tu conexión o intenta con otra imagen.", "error");
       prevStep();
     }
   };
