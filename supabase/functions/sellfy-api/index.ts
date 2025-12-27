@@ -121,29 +121,34 @@ Deno.serve(async (req: Request) => {
         let promptText = "";
 
         if (imageData) {
-            // PROMPT OPTIMIZADO PARA EDICIÓN PROFESIONAL
+            // PROMPT ESTRICTO PARA PRESERVACIÓN DE PRODUCTO
+            // Le decimos al modelo que la imagen input es la verdad absoluta.
             promptText = `
-              TASK: Professional Product Photography Editing.
+              ACT AS A PHOTO EDITOR. DO NOT GENERATE A NEW PRODUCT.
               
-              1. IDENTIFY the main product in the input image.
-              2. DELETE the original background completely.
-              3. GENERATE a new high-quality background based on the style: ${visualStyle}.
-              4. COMPOSITE the product seamlessly into the new background.
+              INPUT IMAGE: This contains the specific product "${productData.name}" that MUST be preserved exactly as shown.
               
-              Angle/Context: ${angle}.
-              Lighting: Professional studio lighting matching ${settings.primaryColor} accents.
-              Output: Photorealistic, 4K, Commercial Grade.
-              DO NOT distort the product text or logo.
+              YOUR TASK:
+              1. KEEP the product from the input image EXACTLY as is. Do not redraw it. Do not change its text, logos, or shape.
+              2. CHANGE ONLY THE BACKGROUND.
+              3. The new background should be: ${visualStyle} style.
+              4. Environment/Setting: ${angle} (Apply this only to the background placement, NOT to the product rotation).
+              5. Use professional lighting colors: ${settings.primaryColor}.
+              
+              OUTPUT: The original product placed naturally in the new background. High fidelity.
             `;
             
             parts.push({ inlineData: { mimeType, data: imageData } });
             parts.push({ text: promptText });
         } else {
+            // Fallback si no hay imagen (Generación desde cero)
             promptText = `
               Create a professional product shot of: ${productData.name}.
               Context: ${productData.benefit}.
               Style: ${visualStyle}.
-              Lighting: Studio with ${settings.primaryColor}.
+              Setting: ${angle}.
+              Lighting: Studio with ${settings.primaryColor} accents.
+              High quality, commercial photography.
             `;
             parts.push({ text: promptText });
         }
