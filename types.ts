@@ -66,7 +66,7 @@ export interface UserSubscription {
 
 export interface ProductData {
   baseImage?: string; // Base64 string
-  userPrompt: string; // Instrucción directa del usuario
+  userPrompt: string; // Instrucción directa del usuario para la imagen
 }
 
 export interface WizardState {
@@ -79,12 +79,12 @@ export interface WizardState {
 
 export interface ContentVariant {
   id: string;
-  image: string; // Base64 image URI or Video URL
-  isVideo: boolean; // Flag to identify video content
+  image: string; // Base64 image URI
+  isVideo?: boolean; 
   copy: string;
   hashtags: string[];
   angle: string;
-  debugPrompt?: string; 
+  debugPrompt?: string;
 }
 
 export interface CampaignResult {

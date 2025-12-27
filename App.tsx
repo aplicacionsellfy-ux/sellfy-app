@@ -113,6 +113,7 @@ const SellfyApp: React.FC = () => {
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [showIntro, setShowIntro] = useState(false);
   const [introSeen, setIntroSeen] = useState(false);
+  const [apiKeyMissing, setApiKeyMissing] = useState(false);
 
   const { session, loading: authLoading, signOut } = useAuth();
   const { settings, subscription, updateSettings, decrementCredits, upgradePlan } = useProfile(session?.user?.id);
@@ -127,6 +128,21 @@ const SellfyApp: React.FC = () => {
     const mobileId = params.get('mobile_upload');
     if (mobileId) {
       setMobileSessionId(mobileId);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Check safely if API_KEY is present in process.env
+    let hasKey = false;
+    try {
+        // @ts-ignore
+        if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+            hasKey = true;
+        }
+    } catch(e) {}
+
+    if (!hasKey) {
+      setApiKeyMissing(true);
     }
   }, []);
 
@@ -188,6 +204,7 @@ const SellfyApp: React.FC = () => {
               onViewImage={setFullScreenImage}
               subscription={subscription}
               onDecrementCredit={decrementCredits}
+              apiKeyMissing={apiKeyMissing}
             />
           )}
         </main>

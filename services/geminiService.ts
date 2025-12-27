@@ -61,8 +61,7 @@ export const regenerateCopyOnly = async (
   tone: string,
   plan: PlanTier = 'free'
 ): Promise<string> => {
-    // Legacy support, or quick regenerate
-    return "Función migrada al generador estratégico.";
+    return "Esta función se ha movido al generador estratégico.";
 };
 
 // 2. Animación de Video (Veo)
@@ -106,7 +105,7 @@ const generateVariantContent = async (
     let debugPromptResult = "";
 
     try {
-        // Solo llamamos a la generación visual. El copy se hace a demanda después.
+        // Solo llamamos a la generación visual.
         const mediaResponse = await invokeAI('generate_visual', {
             index,
             angle,
@@ -134,7 +133,7 @@ const generateVariantContent = async (
         id: `var-${Date.now()}-${index}`,
         image: mediaUrl || "",
         isVideo: isVideoResult,
-        copy: "Genera el copy estratégico abajo 👇", // Placeholder
+        copy: "Usa el generador de copy abajo 👇", // Placeholder limpio
         hashtags: [],
         angle: angle,
         debugPrompt: debugPromptResult
@@ -153,7 +152,6 @@ export const generateCampaign = async (
                   state.platform === Platform.TIKTOK || 
                   state.platform === Platform.IG_REELS;
   
-  // Como el usuario define el prompt, los "ángulos" son solo variaciones sutiles para la IA
   const angles = isVideo 
       ? ["Variation 1", "Variation 2", "Variation 3", "Variation 4"] 
       : ["Variation 1", "Variation 2", "Variation 3", "Variation 4"];
