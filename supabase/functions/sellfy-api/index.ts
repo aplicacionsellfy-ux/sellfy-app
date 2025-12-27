@@ -8,237 +8,155 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  // Manejo de Preflight request (CORS)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    console.log("🔥 [Sellfy API] Inicio de la función...");
-
     const apiKey = Deno.env.get('API_KEY');
-    if (!apiKey) {
-      console.error("❌ API_KEY no encontrada en variables de entorno");
-      return new Response(JSON.stringify({ error: "Falta API Key en el servidor (Supabase Secrets)." }), { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      });
-    }
-
+    if (!apiKey) throw new Error("Falta API Key");
     const ai = new GoogleGenAI({ apiKey });
     
     let payload;
     try {
         const rawBody = await req.text();
-        // Límite de seguridad
-        if (rawBody.length > 6 * 1024 * 1024) {
-             throw new Error("La imagen es demasiado grande (Límite 6MB).");
-        }
+        if (rawBody.length > 8 * 1024 * 1024) throw new Error("Payload muy grande");
         payload = JSON.parse(rawBody);
     } catch (e) {
-        return new Response(JSON.stringify({ error: "Error de datos: " + e.message }), { 
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        });
+        throw new Error("JSON Inválido: " + e.message);
     }
     
-    const { action, plan = 'free', ...data } = payload;
+    const { action, ...data } = payload;
 
-    // --- A. GENERAR TEXTO (COPY) ---
-    if (action === 'generate_copy') {
-        const { productData, platform, settings, angle } = data;
-        
-        const prompt = `
-          Eres un experto copywriter.
-          Producto: "${productData.name}".
-          Beneficio: "${productData.benefit}".
-          Plataforma: ${platform}.
-          Tono: ${settings.tone}.
-          
-          Tarea: Escribe un caption CORTO y persuasivo.
-          Formato JSON:
-          { "copy": "texto", "hashtags": ["#tag1", "#tag2"] }
-        `;
-
-        try {
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
-                contents: prompt,
-                config: { 
-                    responseMimeType: 'application/json',
-                    responseSchema: {
-                        type: Type.OBJECT,
-                        properties: {
-                            copy: { type: Type.STRING },
-                            hashtags: { type: Type.ARRAY, items: { type: Type.STRING } }
-                        }
-                    }
-                }
-            });
-            const result = JSON.parse(response.text);
-            return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        } catch (e) {
-            return new Response(JSON.stringify({ 
-              copy: `${productData.name} - ${productData.benefit}`,
-              hashtags: ["#fyp"]
-            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
-    }
-
-    // --- B. REGENERAR TEXTO ---
-    if (action === 'regenerate_copy') {
-        const { productName, platform, tone } = data;
-        try {
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
-                contents: `Reescribe un caption corto para "${productName}" en ${platform}. Tono: ${tone}.`,
-            });
-            return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        } catch (e) {
-            return new Response(JSON.stringify({ text: "Error regenerando texto." }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
-    }
-
-    // --- C. EDITAR IMAGEN (NANO BANANA / GEMINI FLASH IMAGE) ---
+    // --- 1. GENERAR IMAGEN (NANO BANANA - EDICIÓN PURA) ---
     if (action === 'generate_visual') {
-        const { angle, state, settings } = data;
+        const { state, settings, angle } = data;
         const { productData, visualStyle } = state;
 
-        console.log("🎨 Generando imagen con Nano Banana...");
+        console.log("🎨 Nano Banana: Edición Estricta");
 
-        let imageData = null;
-        let mimeType = 'image/png';
+        if (!productData.baseImage) throw new Error("Se requiere imagen base.");
 
-        if (productData.baseImage) {
-            const parts = productData.baseImage.split(',');
-            if (parts.length === 2) {
-                const match = parts[0].match(/:(.*?);/);
-                if (match) mimeType = match[1];
-                imageData = parts[1];
-            }
-        }
+        const parts = productData.baseImage.split(',');
+        const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
+        const imageBase64 = parts[1];
 
-        const parts = [];
-        let promptText = "";
+        // Prompt Extremadamente Estricto
+        const promptText = `
+          ROLE: Precision Photo Editor (Inpainting/Compositing).
+          
+          INPUT IMAGE: Contains the MAIN PRODUCT.
+          CRITICAL RULE: DO NOT redraw, distort, or change the product object itself. PRESERVE PIXELS of the object.
+          
+          ACTION:
+          1. Segment the main product.
+          2. Replace the background completely.
+          3. New Background Description: ${productData.userPrompt}
+          4. Style: ${visualStyle}.
+          5. Variation: ${angle} (Subtle change in lighting/perspective of background only).
+          6. Lighting: Professional studio lighting compatible with '${settings.primaryColor}' accents.
+          
+          OUTPUT: High-quality photorealistic image. Product perfectly integrated into new background.
+        `;
 
-        if (imageData) {
-            // PROMPT ESTRICTO PARA EDICIÓN DE FONDO (PRESERVANDO OBJETO)
-            promptText = `
-              TASK: Product Photography Post-Processing.
-              
-              INSTRUCTIONS:
-              1. DETECT the main product object in the input image. 
-              2. PRESERVE the product pixels exactly. Do NOT redraw, generate, or alter the product itself.
-              3. REMOVE the existing background entirely.
-              4. GENERATE a new professional background behind the product.
-              
-              BACKGROUND SPECS:
-              - Style: ${visualStyle}.
-              - Setting context (for background only): ${angle}.
-              - Brand Colors for Lighting/Props: ${settings.primaryColor}.
-              - Product Context (for mood only): "${productData.name} - ${productData.description}".
-              
-              OUTPUT: The EXACT original product cutout placed on the new background.
-            `;
-            
-            parts.push({ inlineData: { mimeType, data: imageData } });
-            parts.push({ text: promptText });
-        } else {
-            // Fallback si no hay imagen (Generación desde cero)
-            promptText = `
-              Create a professional product shot.
-              Subject: ${productData.name}.
-              Context: ${productData.benefit}.
-              Style: ${visualStyle}.
-              Setting: ${angle}.
-              Lighting: Studio with ${settings.primaryColor} accents.
-              High quality, commercial photography.
-            `;
-            parts.push({ text: promptText });
-        }
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image', // Nano Banana
+            contents: { parts: [
+                { inlineData: { mimeType, data: imageBase64 } },
+                { text: promptText }
+            ] },
+        });
 
-        try {
-            // Usamos gemini-2.5-flash-image (Nano Banana)
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image',
-                contents: { parts: parts },
-            });
-
-            let b64 = null;
-            if (response.candidates?.[0]?.content?.parts) {
-                for (const part of response.candidates[0].content.parts) {
-                    if (part.inlineData) {
-                        b64 = part.inlineData.data;
-                        break;
-                    }
+        let b64 = null;
+        if (response.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    b64 = part.inlineData.data;
+                    break;
                 }
             }
+        }
 
-            if (b64) {
-                return new Response(JSON.stringify({ 
-                    url: `data:image/png;base64,${b64}`,
-                    isVideo: false,
-                    debugPrompt: promptText 
-                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-            }
-            throw new Error("No se generó imagen.");
-
-        } catch (e) {
-            console.error("Error Gen:", e);
-            const fallbackUrl = productData.baseImage || `https://placehold.co/1080x1350/000?text=${encodeURIComponent(productData.name)}`;
+        if (b64) {
             return new Response(JSON.stringify({ 
-                url: fallbackUrl,
+                url: `data:image/png;base64,${b64}`,
                 isVideo: false,
-                debugPrompt: "Error en generación: " + e.message
+                debugPrompt: promptText 
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
+        throw new Error("Falló la generación de imagen.");
     }
 
-    // --- D. ANIMAR IMAGEN (VEO) ---
+    // --- 2. GENERAR COPY ESTRATÉGICO (NUEVO) ---
+    if (action === 'generate_strategic_copy') {
+        const { imageBase64, userContext, framework, tone, platform } = data;
+        
+        // Limpiar base64 header si existe
+        const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+
+        const prompt = `
+          Actúa como un Copywriter de clase mundial especializado en Conversión.
+          
+          TAREA: Analiza la imagen del producto adjunta y escribe un texto de venta para ${platform}.
+          
+          INFORMACIÓN DE CONTEXTO DADA POR EL USUARIO: "${userContext}"
+          
+          ESTRUCTURA OBLIGATORIA: ${framework}
+          TONO: ${tone}
+          IDIOMA: Español (Neutro/Latinoamérica)
+          
+          Salida: Solo el texto del copy, listo para pegar. Usa emojis con moderación. Incluye 5 hashtags al final.
+        `;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview', // Modelo inteligente para texto + visión
+            contents: { parts: [
+                { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } },
+                { text: prompt }
+            ] },
+        });
+
+        return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // --- 3. ANIMAR IMAGEN (VEO) ---
     if (action === 'animate_image') {
         const { image } = data;
-        try {
-            const parts = image.split(',');
-            const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
-            const imageBytes = parts[1];
+        const parts = image.split(',');
+        const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
+        const imageBytes = parts[1];
 
-            const operation = await ai.models.generateVideos({
-                model: 'veo-3.1-fast-generate-preview',
-                image: { imageBytes, mimeType },
-                prompt: "Cinematic product reveal, slow motion, professional lighting.",
-                config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '9:16' }
-            });
+        const operation = await ai.models.generateVideos({
+            model: 'veo-3.1-fast-generate-preview',
+            image: { imageBytes, mimeType },
+            prompt: "Cinematic product reveal, slow motion, professional lighting.",
+            config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '9:16' }
+        });
 
-            return new Response(JSON.stringify({ operationName: operation.name }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        } catch (e) {
-            return new Response(JSON.stringify({ error: e.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
+        return new Response(JSON.stringify({ operationName: operation.name }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
     }
 
-    // --- E. POLLING VIDEO ---
+    // --- 4. POLLING VIDEO ---
     if (action === 'get_video_operation') {
         const { operationName } = data;
-        try {
-            const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
-            let videoUri = null;
-            let done = false;
-            if (operation.done) {
-                done = true;
-                const vid = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
-                if (vid?.video?.uri) videoUri = `${vid.video.uri}&key=${apiKey}`;
-            }
-            return new Response(JSON.stringify({ done, videoUri }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        } catch (e) {
-            return new Response(JSON.stringify({ done: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
+        let videoUri = null;
+        let done = false;
+        if (operation.done) {
+            done = true;
+            const vid = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
+            if (vid?.video?.uri) videoUri = `${vid.video.uri}&key=${apiKey}`;
         }
+        return new Response(JSON.stringify({ done, videoUri }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     return new Response(JSON.stringify({ error: "Acción desconocida" }), { headers: corsHeaders });
 
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 200, 
+      status: 200, // Siempre 200 para manejar errores en frontend
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

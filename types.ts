@@ -30,6 +30,13 @@ export enum VisualStyle {
   CINEMATIC = 'Cinemático (Video)'
 }
 
+export enum CopyFramework {
+  AIDA = 'AIDA',
+  PAS = 'PAS',
+  FAB = 'FAB',
+  AIDCA = 'AIDCA'
+}
+
 export type PlanTier = 'free' | 'starter' | 'pro';
 
 export interface PlanDetails {
@@ -58,13 +65,8 @@ export interface UserSubscription {
 }
 
 export interface ProductData {
-  name: string;
-  description: string; // Nuevo campo
-  benefit: string;
-  price?: string;
-  promoDetails?: string;
-  targetAudience: string; 
   baseImage?: string; // Base64 string
+  userPrompt: string; // Instrucción directa del usuario
 }
 
 export interface WizardState {
@@ -82,6 +84,7 @@ export interface ContentVariant {
   copy: string;
   hashtags: string[];
   angle: string;
+  debugPrompt?: string; 
 }
 
 export interface CampaignResult {
