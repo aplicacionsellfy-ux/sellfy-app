@@ -8,6 +8,7 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
+  // 1. Manejo de CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -74,7 +75,7 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- C. Generar Imagen Visual (FIDELIDAD MEJORADA) ---
+    // --- C. Generar Imagen Visual (FIDELIDAD EXTREMA - GEMINI 2.5) ---
     if (action === 'generate_visual') {
         const { angle, state, settings } = data;
         const { productData, visualStyle } = state;
@@ -82,16 +83,19 @@ Deno.serve(async (req: Request) => {
         const parts = [];
         let hasImage = false;
 
+        // Validación y limpieza de Base64
         if (state.productData.baseImage) {
             try {
-                // Parsing robusto de Base64 (split por coma es más seguro que regex complejo)
+                // Soportar data URIs directas
                 const partsBase64 = state.productData.baseImage.split(',');
+                
                 if (partsBase64.length === 2) {
                     const mimeMatch = partsBase64[0].match(/:(.*?);/);
                     const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
                     const data64 = partsBase64[1];
 
-                    if (data64) {
+                    // Check de sanidad básico
+                    if (data64 && data64.length > 100) { 
                         hasImage = true;
                         parts.push({
                             inlineData: {
@@ -108,18 +112,22 @@ Deno.serve(async (req: Request) => {
 
         let promptText = "";
         if (hasImage) {
-           // Prompt de Edición Estricto para evitar alucinaciones
+           // Prompt ESPECÍFICO para que Gemini 2.5 respete la imagen
+           // "DO NOT MODIFY THE PRODUCT" es la clave
            promptText = `
-             You are a professional product photo editor.
-             INPUT: The image provided is the REAL PRODUCT.
-             TASK: Keep the product EXACTLY as it is (pixels, logo, shape, color). Do not redraw it.
-             ACTION: Change the background to a "${visualStyle}" style.
-             LIGHTING: Use ${settings.primaryColor} and ${settings.secondaryColor} hints.
-             CONTEXT: ${productData.benefit}.
+             You are a professional product photographer editing a photo.
+             
+             INPUT IMAGE: This is the HERO product. 
+             CRITICAL RULE: Keep the product EXACTLY as it is. Do not redraw it. Do not change the logo or packaging.
+             
+             TASK: Place this exact product in a new environment.
+             STYLE: ${visualStyle}.
+             LIGHTING: ${settings.primaryColor} accents.
              ANGLE: ${angle}.
-             OUTPUT: A photorealistic product shot.
+             OUTPUT: High quality, photorealistic, 4k.
            `;
         } else {
+           // Fallback si no hay imagen (Generación pura)
            promptText = `
              Create a professional product photo for "${productData.name}".
              Style: ${visualStyle}.
@@ -133,6 +141,7 @@ Deno.serve(async (req: Request) => {
         parts.push({ text: promptText });
 
         try {
+            // Usamos gemini-2.5-flash-image porque es MULTIMODAL (entiende la imagen de entrada)
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image', 
                 contents: { parts: parts },
@@ -153,21 +162,22 @@ Deno.serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
                 });
             }
-            throw new Error("No se generó imagen en la respuesta.");
+            
+            throw new Error("El modelo no generó imagen visual.");
 
         } catch (e) {
             console.error("Image Gen Error:", e);
             return new Response(JSON.stringify({ 
-                url: `https://placehold.co/1080x1080/1e293b/ffffff?text=${encodeURIComponent(productData.name)}+Error`, 
-                isVideo: false,
-                error: e.message 
+                error: "Fallo en generación de imagen: " + e.message,
+                // Placeholder de error visual
+                url: `https://placehold.co/1080x1350/1e293b/ffffff?text=Error+Generando` 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
         }
     }
 
-    // --- D. Animar Imagen (Video - Veo) ---
+    // --- D. Animar Imagen (Video - VEO 3.1) ---
     if (action === 'animate_image') {
         const { image } = data; 
         
@@ -179,6 +189,7 @@ Deno.serve(async (req: Request) => {
             const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
             const data64 = partsBase64[1];
 
+            // Iniciar generación de video con Veo
             const operation = await ai.models.generateVideos({
                 model: 'veo-3.1-fast-generate-preview',
                 prompt: "Cinematic commercial, slow motion, 4k, professional lighting.",
@@ -205,7 +216,7 @@ Deno.serve(async (req: Request) => {
         }
     }
 
-    // --- E. Polling Video (CORREGIDO) ---
+    // --- E. Polling Video (BLINDADO CONTRA 500) ---
     if (action === 'get_video_operation') {
         const { operationName } = data;
         
@@ -216,8 +227,8 @@ Deno.serve(async (req: Request) => {
         }
 
         try {
-            // USAMOS getVideosOperation ESPECÍFICO PARA VEO
-            // Pasamos el objeto con la propiedad 'name' correctamente según el SDK
+            // Usamos getVideosOperation específico para Veo
+            // IMPORTANTÍSIMO: Envolvemos en try/catch para que si falla Google, NO falle nuestro servidor
             const operation = await ai.operations.getVideosOperation({ 
                 operation: { name: operationName } 
             });
@@ -240,13 +251,12 @@ Deno.serve(async (req: Request) => {
             });
 
         } catch (e) {
-            console.error("Polling Exception:", e);
-            // Devolvemos el error en debugInfo para que el cliente sepa qué pasó
-            // Pero mantenemos done: false para que siga reintentando si es un error transitorio
+            console.error("Polling Exception (Handled):", e);
+            // Si hay un error al consultar el estado (ej. 404 not found temporal),
+            // devolvemos done: false para que el cliente siga esperando en vez de explotar con un 500.
             return new Response(JSON.stringify({ 
                 done: false, 
-                debugError: e.message,
-                debugStack: e.stack 
+                debugError: "Polling wait..." 
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             });
@@ -258,8 +268,9 @@ Deno.serve(async (req: Request) => {
     });
 
   } catch (error: any) {
-    console.error("GLOBAL SERVER ERROR:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error("CRITICAL SERVER ERROR:", error);
+    // Devolvemos 200 con JSON de error para evitar la pantalla de la muerte en el cliente
+    return new Response(JSON.stringify({ error: "Server Error: " + error.message }), {
       status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
