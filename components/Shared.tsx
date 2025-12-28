@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers, RefreshCw, Share2, FileText, Sparkles, PenTool } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers, FileText, Sparkles, PenTool } from 'lucide-react';
 import { ContentVariant, PlanDetails, CopyFramework, Platform } from '../types';
 import { COPY_FRAMEWORKS } from '../constants';
 import { useToast } from './ui/Toast';
