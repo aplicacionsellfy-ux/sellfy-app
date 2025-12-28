@@ -132,8 +132,14 @@ const SellfyApp: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Check safely if API_KEY is present in process.env
+    // Robust Key Check
     let hasKey = false;
+    // Check Vite Env
+    // @ts-ignore
+    if (import.meta.env && (import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.API_KEY)) {
+        hasKey = true;
+    }
+    // Check Process Env (Legacy/Node)
     try {
         // @ts-ignore
         if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
@@ -141,9 +147,17 @@ const SellfyApp: React.FC = () => {
         }
     } catch(e) {}
 
-    if (!hasKey) {
-      setApiKeyMissing(true);
-    }
+    // Important: The backend might have the key even if frontend doesn't.
+    // We only block if we are sure. For now, assume if not found locally, rely on edge function environment.
+    // If it fails there, the Toast will show an error.
+    // To suppress the "false positive" red warning on local dev if using .env not exposed to client:
+    // We will set apiKeyMissing to false by default, and only true if we explicitly want to block client-side.
+    // Given the Edge Function architecture, the client *should not* need the key necessarily if the proxy handles it.
+    // However, if the client is calling Gemini directly (which it shouldn't if using sellfy-api), we are fine.
+    
+    // For this implementation, we assume the backend handles it, so we don't block the UI based on client-side env var presence.
+    setApiKeyMissing(false); 
+
   }, []);
 
   useEffect(() => {

@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
     // --- 1. GENERAR IMAGEN (NANO BANANA - EDICIÓN PURA) ---
     if (action === 'generate_visual') {
         const { state, settings, angle } = data;
-        const { productData, visualStyle } = state;
+        const { productData, visualStyle, contentType } = state;
 
         console.log("🎨 Nano Banana: Edición Estricta");
 
@@ -41,8 +41,27 @@ Deno.serve(async (req: Request) => {
         const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
         const imageBase64 = parts[1];
 
-        // Prompt Extremadamente Estricto
-        const promptText = `
+        // Definir Intención de Marketing según ContentType
+        let marketingIntentInstructions = "";
+        switch (contentType) {
+            case 'Lanzamiento':
+                marketingIntentInstructions = "INTENT: PRODUCT LAUNCH. Make the lighting dramatic and exciting (like a reveal). Add subtle particle effects or light beams to make it feel new and important.";
+                break;
+            case 'Promoción / Descuento':
+                marketingIntentInstructions = "INTENT: SALE PROMO. Ensure there is some negative space or clean areas in the background where text could be added later. The vibe should be urgent but attractive.";
+                break;
+            case 'Testimonio':
+                marketingIntentInstructions = "INTENT: TRUST & REVIEW. Use very soft, trustworthy lighting. Warm tones. Make it feel authentic and established.";
+                break;
+            case 'Foto Lifestyle':
+                marketingIntentInstructions = "INTENT: LIFESTYLE USAGE. The background should feel lived-in and real (depth of field), not just a sterile studio. Focus on context.";
+                break;
+            default:
+                marketingIntentInstructions = "INTENT: HIGH END PRODUCT SHOT. Focus on clarity, sharpness and perfect studio lighting.";
+        }
+
+        // Construcción del Prompt
+        let promptText = `
           ROLE: Precision Photo Editor (Inpainting/Compositing).
           
           INPUT IMAGE: Contains the MAIN PRODUCT.
@@ -53,11 +72,22 @@ Deno.serve(async (req: Request) => {
           2. Replace the background completely.
           3. New Background Description: ${productData.userPrompt}
           4. Style: ${visualStyle}.
-          5. Variation: ${angle} (Subtle change in lighting/perspective of background only).
-          6. Lighting: Professional studio lighting compatible with '${settings.primaryColor}' accents.
-          
-          OUTPUT: High-quality photorealistic image. Product perfectly integrated into new background.
+          5. Marketing Context: ${marketingIntentInstructions}
+          6. Variation: ${angle} (Subtle change in lighting/perspective of background only).
+          7. Lighting: Professional studio lighting compatible with '${settings.primaryColor}' accents.
         `;
+
+        if (productData.promoOption) {
+           promptText += `
+             8. MARKETING ADD-ON: Integrate a stylish, high-quality 3D text badge or sticker into the composition (next to the product) that says EXACTLY: "${productData.promoOption}". Make it look like a professional advertisement element, not a flat overlay.
+           `;
+        } else {
+            promptText += `
+             8. No text overlays. Clean image.
+            `;
+        }
+          
+        promptText += `\nOUTPUT: High-quality photorealistic image. Product perfectly integrated into new background.`;
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image', // Nano Banana
@@ -87,11 +117,9 @@ Deno.serve(async (req: Request) => {
         throw new Error("Falló la generación de imagen.");
     }
 
-    // --- 2. GENERAR COPY ESTRATÉGICO (NUEVO) ---
+    // --- 2. GENERAR COPY ESTRATÉGICO ---
     if (action === 'generate_strategic_copy') {
         const { imageBase64, userContext, framework, tone, platform } = data;
-        
-        // Limpiar base64 header si existe
         const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
 
         const prompt = `
@@ -109,7 +137,7 @@ Deno.serve(async (req: Request) => {
         `;
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview', // Modelo inteligente para texto + visión
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } },
                 { text: prompt }
@@ -156,7 +184,7 @@ Deno.serve(async (req: Request) => {
 
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 200, // Siempre 200 para manejar errores en frontend
+      status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
