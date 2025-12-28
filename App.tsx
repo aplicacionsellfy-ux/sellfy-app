@@ -113,7 +113,9 @@ const SellfyApp: React.FC = () => {
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [showIntro, setShowIntro] = useState(false);
   const [introSeen, setIntroSeen] = useState(false);
-  const [apiKeyMissing, setApiKeyMissing] = useState(false);
+  
+  // FIX: Eliminar el setter no utilizado para evitar error de compilación
+  const [apiKeyMissing] = useState(false);
 
   const { session, loading: authLoading, signOut } = useAuth();
   const { settings, subscription, updateSettings, decrementCredits, upgradePlan } = useProfile(session?.user?.id);
@@ -128,21 +130,6 @@ const SellfyApp: React.FC = () => {
     const mobileId = params.get('mobile_upload');
     if (mobileId) {
       setMobileSessionId(mobileId);
-    }
-  }, []);
-
-  useEffect(() => {
-    let keyFound = false;
-    try {
-        // @ts-ignore
-        if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-            keyFound = true;
-        }
-    } catch(e) {}
-    
-    // We don't block by default as backend might handle it
-    if (!keyFound) {
-       // Optional: setApiKeyMissing(true); 
     }
   }, []);
 
