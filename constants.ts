@@ -1,6 +1,6 @@
 
 import { ContentType, Platform, VisualStyle, PlanDetails, CopyFramework } from './types';
-import { Camera, Zap, Tag, Rocket, Briefcase, Instagram, Facebook, MessageCircle, Layout, Star, Sun, Palette, Moon, Box, Video, PlayCircle, Coffee, Mountain, Hexagon, Droplets, Percent, Flame, Clock, Leaf, Gem, Layers, Aperture, Anchor, Cloud } from 'lucide-react';
+import { Camera, Zap, Tag, Rocket, Briefcase, Instagram, Facebook, MessageCircle, Layout, Star, Sun, Palette, Moon, Box, Video, PlayCircle, Coffee, Mountain, Hexagon, Droplets, Percent, Flame, Clock, Leaf, Gem, Layers, Aperture, Cloud } from 'lucide-react';
 
 export const CREDIT_COSTS = {
   IMAGE: 1,
@@ -89,7 +89,6 @@ export const STYLE_OPTIONS = [
 ];
 
 // SCENE PRESETS INTELIGENTES
-// Ahora incluyen la propiedad 'styles' para filtrar según la selección anterior
 export const SCENE_PRESETS = [
   // --- MINIMALISTA ---
   { 
@@ -222,7 +221,6 @@ export const SCENE_PRESETS = [
   }
 ];
 
-// ETIQUETAS DE VENTA RÁPIDA
 export const PROMO_BADGES = [
   { id: 'none', label: 'Sin Oferta', icon: Box, text: null },
   { id: 'sale', label: 'Sale', icon: Tag, text: 'SALE' },

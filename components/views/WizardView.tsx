@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Camera, ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, Monitor, Wand2, FileText, Tag, Filter, ScanLine, BrainCircuit } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, Monitor, Wand2, FileText, Tag, Filter, BrainCircuit } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS, COPY_FRAMEWORKS, SCENE_PRESETS, PROMO_BADGES } from '../../constants';
 import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription, CopyFramework } from '../../types';

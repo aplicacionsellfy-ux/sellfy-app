@@ -66,7 +66,15 @@ export interface UserSubscription {
 
 export interface ProductData {
   baseImage?: string; // Base64 string
-  userPrompt: string; // Instrucción directa del usuario para la imagen
+  userPrompt?: string; // Prompt generado por el escenario
+  promoOption?: string; // Texto del badge promocional
+  // Campos antiguos opcionales por compatibilidad
+  name?: string;
+  benefit?: string;
+  price?: string;
+  promoDetails?: string;
+  targetAudience?: string;
+  description?: string;
 }
 
 export interface WizardState {
