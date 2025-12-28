@@ -35,7 +35,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
     visualStyle: null,
     productData: {
       baseImage: undefined,
-      userPrompt: '' // Inicialización limpia sin campos 'name', 'benefit', etc.
+      userPrompt: ''
     }
   });
 
@@ -405,7 +405,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                         </div>
                         
                         <div className="grid grid-cols-1 gap-3">
-                            {COPY_FRAMEWORKS.map((fw) => (
+                            {COPY_FRAMEWORKS.map((fw: any) => (
                                 <button
                                     key={fw.id}
                                     onClick={() => setSelectedFramework(fw.id)}

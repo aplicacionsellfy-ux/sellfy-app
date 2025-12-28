@@ -56,10 +56,10 @@ export const generateStrategicCopy = async (
 };
 
 export const regenerateCopyOnly = async (
-  productName: string, 
-  platform: string, 
-  tone: string,
-  plan: PlanTier = 'free'
+  _productName: string, 
+  _platform: string, 
+  _tone: string,
+  _plan: PlanTier = 'free'
 ): Promise<string> => {
     return "Esta función se ha movido al generador estratégico.";
 };
@@ -98,8 +98,8 @@ const generateVariantContent = async (
   settings: BusinessSettings, 
   plan: PlanTier
 ): Promise<ContentVariant> => {
-    const { productData } = state;
-
+    
+    // Eliminado destructuring no usado de productData
     let mediaUrl: string | null = null;
     let isVideoResult = false;
     let debugPromptResult = "";
