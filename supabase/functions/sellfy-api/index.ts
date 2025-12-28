@@ -1,6 +1,6 @@
 
 // @ts-nocheck
-import { GoogleGenAI, Type } from "https://esm.sh/@google/genai";
+import { GoogleGenAI } from "https://esm.sh/@google/genai";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,7 +20,7 @@ Deno.serve(async (req: Request) => {
     let payload;
     try {
         const rawBody = await req.text();
-        if (rawBody.length > 8 * 1024 * 1024) throw new Error("Payload muy grande");
+        if (rawBody.length > 10 * 1024 * 1024) throw new Error("Payload muy grande (Max 10MB)");
         payload = JSON.parse(rawBody);
     } catch (e) {
         throw new Error("JSON Inválido: " + e.message);
@@ -28,12 +28,10 @@ Deno.serve(async (req: Request) => {
     
     const { action, ...data } = payload;
 
-    // --- 1. GENERAR IMAGEN (NANO BANANA - EDICIÓN PURA) ---
+    // --- 1. GENERAR IMAGEN (NANO BANANA - PRESERVACIÓN ESTRICTA) ---
     if (action === 'generate_visual') {
         const { state, settings, angle } = data;
-        const { productData, visualStyle, contentType } = state;
-
-        console.log("🎨 Nano Banana: Edición Estricta");
+        const { productData, visualStyle } = state;
 
         if (!productData.baseImage) throw new Error("Se requiere imagen base.");
 
@@ -41,60 +39,34 @@ Deno.serve(async (req: Request) => {
         const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
         const imageBase64 = parts[1];
 
-        // Definir Intención de Marketing según ContentType
-        let marketingIntentInstructions = "";
-        switch (contentType) {
-            case 'Lanzamiento':
-                marketingIntentInstructions = "INTENT: PRODUCT LAUNCH. Make the lighting dramatic and exciting (like a reveal). Add subtle particle effects or light beams to make it feel new and important.";
-                break;
-            case 'Promoción / Descuento':
-                marketingIntentInstructions = "INTENT: SALE PROMO. Ensure there is some negative space or clean areas in the background where text could be added later. The vibe should be urgent but attractive.";
-                break;
-            case 'Testimonio':
-                marketingIntentInstructions = "INTENT: TRUST & REVIEW. Use very soft, trustworthy lighting. Warm tones. Make it feel authentic and established.";
-                break;
-            case 'Foto Lifestyle':
-                marketingIntentInstructions = "INTENT: LIFESTYLE USAGE. The background should feel lived-in and real (depth of field), not just a sterile studio. Focus on context.";
-                break;
-            default:
-                marketingIntentInstructions = "INTENT: HIGH END PRODUCT SHOT. Focus on clarity, sharpness and perfect studio lighting.";
-        }
-
-        // Construcción del Prompt
-        let promptText = `
-          ROLE: Precision Photo Editor (Inpainting/Compositing).
+        // Prompt de Ingeniería Inversa para evitar "alucinación"
+        // Le decimos al modelo que NO dibuje el producto, sino que lo "recorte y pegue".
+        const promptText = `
+          TASK: Product Photography Compositing.
           
-          INPUT IMAGE: Contains the MAIN PRODUCT.
-          CRITICAL RULE: DO NOT redraw, distort, or change the product object itself. PRESERVE PIXELS of the object.
+          INPUT: The attached image contains the REFERENCE PRODUCT.
+          STRICT CONSTRAINT: PRESERVE THE PRODUCT OBJECT EXACTLY AS IS. DO NOT REDRAW IT. DO NOT HALLUCINATE NEW DETAILS.
           
-          ACTION:
-          1. Segment the main product.
-          2. Replace the background completely.
-          3. New Background Description: ${productData.userPrompt}
-          4. Style: ${visualStyle}.
-          5. Marketing Context: ${marketingIntentInstructions}
-          6. Variation: ${angle} (Subtle change in lighting/perspective of background only).
-          7. Lighting: Professional studio lighting compatible with '${settings.primaryColor}' accents.
+          INSTRUCTIONS:
+          1. Keep the main product from the input image unchanged.
+          2. Generate a NEW BACKGROUND behind the product based on this description: "${productData.userPrompt}".
+          3. Style: ${visualStyle}.
+          4. Lighting: Match the product's lighting to the new background (Professional Studio Lighting).
+          5. Composition: ${angle}.
+          6. Marketing Vibe: High-end commercial photography, sharp focus on the product.
+          
+          ${productData.promoOption ? `7. ADDITION: Place a realistic 3D badge/tag next to the product that says "${productData.promoOption}".` : ""}
         `;
 
-        if (productData.promoOption) {
-           promptText += `
-             8. MARKETING ADD-ON: Integrate a stylish, high-quality 3D text badge or sticker into the composition (next to the product) that says EXACTLY: "${productData.promoOption}". Make it look like a professional advertisement element, not a flat overlay.
-           `;
-        } else {
-            promptText += `
-             8. No text overlays. Clean image.
-            `;
-        }
-          
-        promptText += `\nOUTPUT: High-quality photorealistic image. Product perfectly integrated into new background.`;
-
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image', // Nano Banana
+            model: 'gemini-2.5-flash-image', // Nano Banana optimizado para tareas multimodales rápidas
             contents: { parts: [
                 { inlineData: { mimeType, data: imageBase64 } },
                 { text: promptText }
             ] },
+            config: {
+                temperature: 0.4 // Temperatura baja para ser más fiel a la imagen input
+            }
         });
 
         let b64 = null;
@@ -114,37 +86,53 @@ Deno.serve(async (req: Request) => {
                 debugPrompt: promptText 
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
-        throw new Error("Falló la generación de imagen.");
+        throw new Error("La IA no devolvió una imagen válida.");
     }
 
     // --- 2. GENERAR COPY ESTRATÉGICO ---
     if (action === 'generate_strategic_copy') {
         const { imageBase64, userContext, framework, tone, platform } = data;
-        const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+        
+        // Limpieza robusta del base64
+        let cleanBase64 = imageBase64;
+        let mimeType = 'image/jpeg';
+        
+        if (imageBase64.includes(',')) {
+            const parts = imageBase64.split(',');
+            mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+            cleanBase64 = parts[1];
+        }
 
         const prompt = `
-          Actúa como un Copywriter de clase mundial especializado en Conversión.
+          Eres un experto Copywriter de Respuesta Directa.
           
-          TAREA: Analiza la imagen del producto adjunta y escribe un texto de venta para ${platform}.
+          TAREA: Escribe un post para ${platform} analizando la IMAGEN PROPORCIONADA.
           
-          INFORMACIÓN DE CONTEXTO DADA POR EL USUARIO: "${userContext}"
+          DETALLES:
+          - Producto/Oferta: ${userContext}
+          - Framework Psicológico: ${framework} (Sigue esta estructura estrictamente)
+          - Tono de Voz: ${tone}
           
-          ESTRUCTURA OBLIGATORIA: ${framework}
-          TONO: ${tone}
-          IDIOMA: Español (Neutro/Latinoamérica)
-          
-          Salida: Solo el texto del copy, listo para pegar. Usa emojis con moderación. Incluye 5 hashtags al final.
+          FORMATO DE SALIDA:
+          - No incluyas introducciones como "Aquí tienes el copy".
+          - Usa párrafos cortos y espaciados.
+          - Incluye emojis relevantes pero no excesivos.
+          - Termina con 5-7 hashtags estratégicos.
+          - Idioma: Español Neutro.
         `;
 
+        // Usamos gemini-2.5-flash-image porque acepta imagenes de input y es rápido
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3-flash-preview', 
             contents: { parts: [
-                { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } },
+                { inlineData: { mimeType: mimeType, data: cleanBase64 } },
                 { text: prompt }
             ] },
         });
 
-        return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        const text = response.text || "No se pudo generar el texto.";
+
+        return new Response(JSON.stringify({ text: text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // --- 3. ANIMAR IMAGEN (VEO) ---
@@ -157,7 +145,7 @@ Deno.serve(async (req: Request) => {
         const operation = await ai.models.generateVideos({
             model: 'veo-3.1-fast-generate-preview',
             image: { imageBytes, mimeType },
-            prompt: "Cinematic product reveal, slow motion, professional lighting.",
+            prompt: "Cinematic camera movement, subtle product motion, high quality, 4k, advertising style.",
             config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '9:16' }
         });
 
@@ -183,8 +171,9 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "Acción desconocida" }), { headers: corsHeaders });
 
   } catch (error) {
+    console.error("Server Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 200, 
+      status: 200, // Retornamos 200 para que el cliente maneje el error JSON
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

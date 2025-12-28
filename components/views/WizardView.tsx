@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, Monitor, Wand2, FileText, Tag, Filter, BrainCircuit } from 'lucide-react';
 import QRCode from 'react-qr-code';
-import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS, COPY_FRAMEWORKS, SCENE_PRESETS, PROMO_BADGES } from '../../constants';
-import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription, CopyFramework } from '../../types';
-import { generateCampaign, generateStrategicCopy } from '../../services/geminiService';
+import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS, SCENE_PRESETS, PROMO_BADGES } from '../../constants';
+import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription } from '../../types';
+import { generateCampaign } from '../../services/geminiService';
 import { SelectionCard, VariantCard } from '../Shared';
 import { useToast } from '../ui/Toast';
 import { supabase } from '../../lib/supabase';
@@ -52,11 +52,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
   const [uploadMethod, setUploadMethod] = useState<'desktop' | 'mobile'>('desktop');
   const [qrSessionId, setQrSessionId] = useState<string | null>(null);
 
-  // Copy Generation State
-  const [selectedFramework, setSelectedFramework] = useState<CopyFramework>(CopyFramework.AIDA);
-  const [isGeneratingCopy, setIsGeneratingCopy] = useState(false);
-  const [generatedStrategicCopy, setGeneratedStrategicCopy] = useState<string | null>(null);
-
   const isVideo = 
     state.contentType === ContentType.VIDEO_REEL || 
     state.platform === Platform.TIKTOK || 
@@ -73,24 +68,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
   const finalScenes = filteredScenes.length < 3 
     ? [...filteredScenes, ...SCENE_PRESETS.filter(s => s.id === 'studio_clean' || s.id === 'geometric_podium' || s.id === 'soft_shadow').filter(s => !filteredScenes.includes(s))]
     : filteredScenes;
-
-  // Lógica de Recomendación de Copy
-  const getRecommendedFramework = (): CopyFramework => {
-      switch (state.contentType) {
-          case ContentType.LAUNCH: return CopyFramework.AIDA;
-          case ContentType.PROMO: return CopyFramework.PAS; // Focus on pain point (price/scarcity) -> Solution
-          case ContentType.PRODUCT: return CopyFramework.FAB;
-          case ContentType.TESTIMONIAL: return CopyFramework.AIDCA;
-          default: return CopyFramework.AIDA;
-      }
-  };
-
-  useEffect(() => {
-      // Auto-select recommended framework when content type changes
-      if (state.contentType) {
-          setSelectedFramework(getRecommendedFramework());
-      }
-  }, [state.contentType]);
 
   useEffect(() => {
     return () => {
@@ -209,26 +186,6 @@ export const WizardView: React.FC<WizardViewProps> = ({
     }
   };
 
-  const handleStrategicCopy = async () => {
-    if (!state.productData.baseImage) return;
-    setIsGeneratingCopy(true);
-    try {
-        const text = await generateStrategicCopy(
-            state.productData.baseImage,
-            `Oferta: ${PROMO_BADGES.find(p => p.id === selectedPromoId)?.label || 'Producto'}`, 
-            selectedFramework,
-            businessSettings.tone,
-            state.platform!
-        );
-        setGeneratedStrategicCopy(text);
-        addToast("Copy Estratégico Generado", "success");
-    } catch (e) {
-        addToast("Error generando copy", "error");
-    } finally {
-        setIsGeneratingCopy(false);
-    }
-  };
-
   const resetApp = () => {
     setState({
       step: 1, contentType: null, platform: null, visualStyle: null,
@@ -236,7 +193,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
     });
     setSelectedSceneId(null); setSelectedPromoId('none');
     setResult(null); setQrSessionId(null); setUploadMethod('desktop');
-    setGeneratedStrategicCopy(null); setAnalysisComplete(false);
+    setAnalysisComplete(false);
   };
 
   return (
@@ -444,7 +401,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
         </div>
       )}
 
-      {/* STEP 6: RESULTADOS & COPY STRATEGY */}
+      {/* STEP 6: RESULTADOS (Modified - No copy section) */}
       {state.step === 6 && result && (
         <div className="space-y-12 pb-20 animate-in slide-in-from-bottom-8 duration-500">
           
@@ -456,86 +413,16 @@ export const WizardView: React.FC<WizardViewProps> = ({
              </div>
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {result.variants.map((variant) => (
-                <VariantCard key={variant.id} variant={variant} onView={onViewImage} showWatermark={subscription.plan === 'free'} />
+                <VariantCard 
+                    key={variant.id} 
+                    variant={variant} 
+                    onView={onViewImage} 
+                    showWatermark={subscription.plan === 'free'}
+                    platform={state.platform!}
+                />
                 ))}
             </div>
           </div>
-
-          {/* SECTION B: COPY GENERATOR (Improved) */}
-          <div className="border-t border-white/10 pt-10">
-             <div className="bg-[#0B0F19] border border-white/10 rounded-3xl p-8 max-w-4xl mx-auto shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-[80px] pointer-events-none"></div>
-                
-                <div className="flex flex-col md:flex-row gap-8">
-                    <div className="flex-1 space-y-6">
-                        <div>
-                            <h3 className="text-2xl font-bold text-white flex items-center gap-2"><FileText className="text-emerald-400"/> Generador de Copy</h3>
-                            <p className="text-slate-400 text-sm mt-2">Elige la estructura psicológica para tu texto.</p>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 gap-3">
-                            {COPY_FRAMEWORKS.map((fw: any) => {
-                                const isRecommended = getRecommendedFramework() === fw.id;
-                                return (
-                                <button
-                                    key={fw.id}
-                                    onClick={() => setSelectedFramework(fw.id)}
-                                    className={`text-left p-4 rounded-xl border transition-all relative ${selectedFramework === fw.id ? 'bg-emerald-500/10 border-emerald-500/50 text-white shadow-lg' : 'bg-white/5 border-white/5 text-slate-400 hover:bg-white/10'}`}
-                                >
-                                    {isRecommended && (
-                                        <div className="absolute -top-2 -right-2 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md animate-bounce">
-                                            IA RECOMIENDA
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="font-bold">{fw.label}</span>
-                                        {selectedFramework === fw.id && <CheckCircle size={14} className="text-emerald-400"/>}
-                                    </div>
-                                    <p className="text-xs opacity-90 font-semibold mb-1">{fw.title}</p>
-                                    <p className="text-[10px] opacity-60 leading-tight">{fw.desc}</p>
-                                </button>
-                                )
-                            })}
-                        </div>
-
-                        <button 
-                            onClick={handleStrategicCopy}
-                            disabled={isGeneratingCopy}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                            {isGeneratingCopy ? <RefreshCw className="animate-spin" /> : <Sparkles size={18} />}
-                            {isGeneratingCopy ? 'Redactando...' : 'Generar Copy con IA'}
-                        </button>
-                    </div>
-
-                    <div className="flex-1 bg-black/20 rounded-2xl border border-white/5 p-6 relative min-h-[300px] flex flex-col">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 block">Resultado IA</span>
-                        {generatedStrategicCopy ? (
-                             <div className="prose prose-invert prose-sm max-w-none flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                                 <div className="whitespace-pre-wrap text-slate-200 leading-relaxed animate-in fade-in">
-                                     {generatedStrategicCopy}
-                                 </div>
-                             </div>
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-600">
-                                <FileText size={48} className="mb-4 opacity-20" />
-                                <p className="text-sm">Selecciona una estructura y genera el texto.</p>
-                            </div>
-                        )}
-                        
-                        {generatedStrategicCopy && (
-                             <button 
-                                onClick={() => {navigator.clipboard.writeText(generatedStrategicCopy); addToast("Copiado!", "success");}}
-                                className="mt-4 w-full py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-bold text-slate-300 transition-colors"
-                             >
-                                 Copiar al Portapapeles
-                             </button>
-                        )}
-                    </div>
-                </div>
-             </div>
-          </div>
-
         </div>
       )}
 

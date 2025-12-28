@@ -1,9 +1,140 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers, RefreshCw, Share2 } from 'lucide-react';
-import { ContentVariant, PlanDetails } from '../types';
+import { Download, Maximize2, Copy, X, CheckCircle, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers, RefreshCw, Share2, FileText, Sparkles, PenTool } from 'lucide-react';
+import { ContentVariant, PlanDetails, CopyFramework, Platform } from '../types';
+import { COPY_FRAMEWORKS } from '../constants';
 import { useToast } from './ui/Toast';
-import { animateImageWithVeo, regenerateCopyOnly } from '../services/geminiService';
+import { animateImageWithVeo, generateStrategicCopy } from '../services/geminiService';
+
+// --- NEW COMPONENT: COPYWRITER MODAL ---
+interface CopyModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    image: string;
+    initialContext: string; // Product name/offer
+    platform: Platform;
+}
+
+export const CopyGeneratorModal: React.FC<CopyModalProps> = ({ isOpen, onClose, image, initialContext, platform }) => {
+    const { addToast } = useToast();
+    const [framework, setFramework] = useState<CopyFramework>(CopyFramework.AIDA);
+    const [tone, setTone] = useState('Profesional');
+    const [generatedText, setGeneratedText] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    useEffect(() => {
+        if (isOpen && !generatedText) {
+            // Auto-generate on open if empty? Maybe let user choose first.
+        }
+    }, [isOpen]);
+
+    if (!isOpen) return null;
+
+    const handleGenerate = async () => {
+        setIsLoading(true);
+        try {
+            const text = await generateStrategicCopy(image, initialContext, framework, tone, platform);
+            setGeneratedText(text);
+        } catch (e) {
+            addToast("Error generando texto", "error");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(generatedText);
+        addToast("Copiado al portapapeles", "success");
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-[#0B0F19] border border-white/10 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                
+                {/* Header */}
+                <div className="p-4 border-b border-white/5 flex justify-between items-center bg-[#020617]">
+                    <h3 className="text-white font-bold flex items-center gap-2">
+                        <PenTool size={18} className="text-indigo-400"/> IA Copywriter
+                    </h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 flex flex-col md:flex-row gap-6">
+                    
+                    {/* Controls */}
+                    <div className="w-full md:w-1/3 space-y-6">
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Estructura</label>
+                            <div className="space-y-2">
+                                {COPY_FRAMEWORKS.map(fw => (
+                                    <button 
+                                        key={fw.id}
+                                        onClick={() => setFramework(fw.id)}
+                                        className={`w-full text-left p-3 rounded-xl border text-xs transition-all ${framework === fw.id ? 'bg-indigo-500/20 border-indigo-500 text-white' : 'bg-white/5 border-white/5 text-slate-400 hover:bg-white/10'}`}
+                                    >
+                                        <div className="font-bold mb-0.5">{fw.label}</div>
+                                        <div className="text-[10px] opacity-70 leading-tight">{fw.title}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Tono</label>
+                            <select 
+                                value={tone} 
+                                onChange={(e) => setTone(e.target.value)}
+                                className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-indigo-500"
+                            >
+                                <option value="Profesional">Profesional</option>
+                                <option value="Divertido">Divertido</option>
+                                <option value="Urgente">Urgente (Ventas)</option>
+                                <option value="Storytelling">Storytelling</option>
+                                <option value="Lujo">Lujo / Exclusivo</option>
+                            </select>
+                        </div>
+
+                        <button 
+                            onClick={handleGenerate} 
+                            disabled={isLoading}
+                            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                            {isLoading ? <Loader2 className="animate-spin" size={16}/> : <Sparkles size={16}/>}
+                            Generar Texto
+                        </button>
+                    </div>
+
+                    {/* Result */}
+                    <div className="flex-1 flex flex-col bg-black/20 rounded-xl border border-white/5 min-h-[300px]">
+                        <div className="p-3 border-b border-white/5 flex justify-between items-center">
+                            <span className="text-xs font-bold text-slate-400">Resultado</span>
+                            {generatedText && (
+                                <button onClick={handleCopy} className="text-xs flex items-center gap-1 text-emerald-400 hover:text-emerald-300">
+                                    <Copy size={12}/> Copiar
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex-1 p-4 overflow-y-auto">
+                            {isLoading ? (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                                    <Loader2 className="animate-spin text-indigo-400" size={32}/>
+                                    <span className="text-xs animate-pulse">Escribiendo copy perfecto...</span>
+                                </div>
+                            ) : generatedText ? (
+                                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{generatedText}</p>
+                            ) : (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-600">
+                                    <FileText size={32} className="opacity-20 mb-2"/>
+                                    <p className="text-xs text-center px-4">Selecciona una estructura y genera tu texto de venta.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // Full Screen Image/Video Modal
 export const FullScreenModal: React.FC<{ 
@@ -179,18 +310,19 @@ export const SelectionCard: React.FC<SelectionCardProps> = ({ selected, onClick,
 export const VariantCard: React.FC<{ 
   variant: ContentVariant; 
   onView: (img: string) => void;
-  showWatermark?: boolean; 
-}> = ({ variant, onView, showWatermark = false }) => {
+  showWatermark?: boolean;
+  platform?: Platform; // Optional prop to pass platform context 
+}> = ({ variant, onView, showWatermark = false, platform = Platform.IG_FEED }) => {
   const { addToast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
-  
-  // State for Copy Regeneration
-  const [currentCopy, setCurrentCopy] = useState(variant.copy);
-  const [isRegeneratingText, setIsRegeneratingText] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
+
+  // Modal State
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
 
   const activeMediaUrl = localVideoUrl || variant.image;
   const isVideo = activeMediaUrl.endsWith('.mp4') || activeMediaUrl.includes('video') || variant.isVideo || !!localVideoUrl;
@@ -213,67 +345,6 @@ export const VariantCard: React.FC<{
     link.click();
     document.body.removeChild(link);
     addToast("Archivo descargado", "success");
-  };
-
-  const handleCopyText = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(`${currentCopy}\n\n${variant.hashtags.join(' ')}`);
-    addToast("Copy copiado", "success");
-  };
-
-  const handleRegenerateText = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isRegeneratingText) return;
-
-    setIsRegeneratingText(true);
-    try {
-        const newText = await regenerateCopyOnly("Producto", "Social Media", "Professional");
-        if (newText) setCurrentCopy(newText);
-        addToast("Texto regenerado", "success");
-    } catch {
-        addToast("Error regenerando texto", "error");
-    } finally {
-        setIsRegeneratingText(false);
-    }
-  };
-
-  const handlePublish = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const fullText = `${currentCopy}\n\n${variant.hashtags.join(' ')}`;
-    
-    // Check if Web Share API is available (Mobile Native Share)
-    if (navigator.share) {
-        try {
-            // Convert base64 image to file for sharing if possible
-            let fileArray: File[] = [];
-            if (!isVideo && activeMediaUrl.startsWith('data:')) {
-                const res = await fetch(activeMediaUrl);
-                const blob = await res.blob();
-                const file = new File([blob], 'image.png', { type: 'image/png' });
-                fileArray = [file];
-            }
-
-            await navigator.share({
-                title: 'Nuevo Post - Sellfy',
-                text: fullText,
-                files: fileArray.length > 0 ? fileArray : undefined,
-                url: isVideo ? activeMediaUrl : undefined 
-            });
-            addToast("Compartido exitosamente", "success");
-        } catch (err) {
-            console.error(err);
-             // Fallback if sharing fails or cancelled
-             addToast("Copiado al portapapeles", "info");
-             navigator.clipboard.writeText(fullText);
-        }
-    } else {
-        // Desktop Fallback: Simulation
-        addToast("Abriendo plataforma...", "info");
-        navigator.clipboard.writeText(fullText);
-        setTimeout(() => { 
-            window.open('https://instagram.com', '_blank');
-        }, 1000);
-    }
   };
 
   const handleAnimate = async (e: React.MouseEvent) => {
@@ -305,6 +376,15 @@ export const VariantCard: React.FC<{
   };
 
   return (
+    <>
+    <CopyGeneratorModal 
+        isOpen={isCopyModalOpen} 
+        onClose={() => setIsCopyModalOpen(false)}
+        image={variant.image}
+        initialContext="Producto"
+        platform={platform}
+    />
+
     <div className="group relative flex flex-col bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl overflow-hidden hover:border-indigo-500/40 hover:shadow-[0_15px_40px_-10px_rgba(79,70,229,0.2)] hover:-translate-y-1 transition-all duration-500 ease-out">
       
       {/* Media Area */}
@@ -346,6 +426,19 @@ export const VariantCard: React.FC<{
             </div>
         )}
 
+        {/* Prompt Overlay */}
+        {showPrompt && (
+            <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-40 p-4 overflow-y-auto animate-in fade-in flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Prompt de Gemini</h4>
+                    <button onClick={() => setShowPrompt(false)} className="text-white/50 hover:text-white"><X size={16}/></button>
+                </div>
+                <p className="text-[10px] text-indigo-300 font-mono leading-relaxed whitespace-pre-wrap flex-1">
+                    {variant.debugPrompt || "Prompt no disponible."}
+                </p>
+            </div>
+        )}
+
         <div className="absolute inset-0 bg-gradient-to-t from-[#020617] via-transparent to-transparent opacity-60 pointer-events-none"></div>
         
         {showWatermark && (
@@ -371,7 +464,6 @@ export const VariantCard: React.FC<{
 
       <div className="flex-1 p-5 flex flex-col border-t border-white/5 bg-gradient-to-b from-white/[0.02] to-transparent">
         
-        {/* SUBTLE HEADER FOR ANGLE */}
         <div className="flex items-center gap-2 mb-3 justify-between">
             <div className="flex items-center gap-2">
                 <div className="p-1 rounded-md bg-white/5 border border-white/5">
@@ -382,33 +474,25 @@ export const VariantCard: React.FC<{
                 </span>
             </div>
             
-            {/* REGENERATE TEXT BUTTON */}
             <button 
-                onClick={handleRegenerateText}
-                disabled={isRegeneratingText}
+                onClick={(e) => { e.stopPropagation(); setShowPrompt(!showPrompt); }}
                 className="text-slate-500 hover:text-indigo-400 transition-colors"
-                title="Reescribir Texto"
+                title="Ver Prompt"
             >
-                <RefreshCw size={14} className={isRegeneratingText ? "animate-spin" : ""} />
+                <FileText size={14} />
             </button>
         </div>
 
-        <div className="flex-1 mb-4 relative">
-           <p className={`text-sm text-slate-300 font-light leading-relaxed whitespace-pre-wrap ${isRegeneratingText ? 'opacity-50 blur-sm' : ''} transition-all duration-300`}>
-             {currentCopy}
-           </p>
-           <div className="flex flex-wrap gap-1.5 mt-3">{variant.hashtags.slice(0, 5).map((tag, i) => (<span key={i} className="text-[10px] text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/10">{tag}</span>))}</div>
-        </div>
-
-        <button onClick={handleCopyText} className="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-xs font-bold uppercase tracking-wide border border-white/5 transition-all flex items-center justify-center gap-2 group/btn mb-3"><Copy size={14} className="group-hover/btn:scale-110 transition-transform" /> Copiar Texto</button>
-        
+        {/* COPYWRITER TRIGGER BUTTON */}
         <button 
-           onClick={handlePublish}
-           className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wide shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 transition-all flex items-center justify-center gap-2 group/pub transform active:scale-95"
-         >
-           <Share2 size={14} className="group-hover/pub:translate-x-0.5 group-hover/pub:-translate-y-0.5 transition-transform" /> Publicar
-         </button>
+            onClick={(e) => { e.stopPropagation(); setIsCopyModalOpen(true); }}
+            className="w-full py-3 mb-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-bold uppercase tracking-wide border border-white/5 hover:border-indigo-500/30 transition-all flex items-center justify-center gap-2 group/btn"
+        >
+            <PenTool size={14} className="text-indigo-400 group-hover/btn:scale-110 transition-transform"/> Generar Copy
+        </button>
+
       </div>
     </div>
+    </>
   );
 };
