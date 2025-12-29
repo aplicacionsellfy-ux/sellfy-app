@@ -32,7 +32,19 @@ const invokeAI = async (action: string, payload: any, retries = 1) => {
 
 // --- GENERADORES ---
 
-// 1. Copy Estratégico (Nuevo)
+// 0. Análisis de Producto (Real AI Vision)
+export const analyzeProductImage = async (imageBase64: string): Promise<string> => {
+    try {
+        console.log("👁️ Analizando imagen con Gemini Vision...");
+        const { analysis } = await invokeAI('analyze_image', { imageBase64 });
+        return analysis;
+    } catch (e) {
+        console.error("Error analizando imagen:", e);
+        return "Producto genérico";
+    }
+};
+
+// 1. Copy Estratégico
 export const generateStrategicCopy = async (
     imageBase64: string, 
     userContext: string,
@@ -99,7 +111,6 @@ const generateVariantContent = async (
   plan: PlanTier
 ): Promise<ContentVariant> => {
     
-    // Eliminado destructuring no usado de productData
     let mediaUrl: string | null = null;
     let isVideoResult = false;
     let debugPromptResult = "";
@@ -109,7 +120,7 @@ const generateVariantContent = async (
         const mediaResponse = await invokeAI('generate_visual', {
             index,
             angle,
-            state,
+            state, // Ahora incluye state.productData.aiAnalysis
             settings,
             plan 
         });
@@ -146,7 +157,7 @@ export const generateCampaign = async (
   plan: PlanTier
 ): Promise<CampaignResult> => {
   
-  console.log(`🚀 Iniciando campaña simple (Solo Imagen)...`);
+  console.log(`🚀 Iniciando campaña con contexto IA: ${state.productData.aiAnalysis?.substring(0, 30)}...`);
   
   const isVideo = state.contentType === ContentType.VIDEO_REEL || 
                   state.platform === Platform.TIKTOK || 
@@ -161,6 +172,7 @@ export const generateCampaign = async (
   for (let i = 0; i < angles.length; i++) {
       const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);
+      // Pequeño delay para no saturar
       if (i < angles.length - 1) await new Promise(r => setTimeout(r, 200));
   }
 

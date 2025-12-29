@@ -75,6 +75,8 @@ export interface ProductData {
   promoDetails?: string;
   targetAudience?: string;
   description?: string;
+  // New field for Real AI Analysis
+  aiAnalysis?: string; 
 }
 
 export interface WizardState {

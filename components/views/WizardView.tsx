@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, Monitor, Wand2, Tag, Filter, BrainCircuit } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Upload, Sparkles, RefreshCw, CheckCircle, Lock, Zap, Smartphone, Monitor, Wand2, Tag, Filter, BrainCircuit, Loader2 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { CONTENT_OPTIONS, PLATFORM_OPTIONS, STYLE_OPTIONS, CREDIT_COSTS, SCENE_PRESETS, PROMO_BADGES } from '../../constants';
 import { WizardState, ContentType, Platform, VisualStyle, CampaignResult, BusinessSettings, UserSubscription } from '../../types';
-import { generateCampaign } from '../../services/geminiService';
+import { generateCampaign, analyzeProductImage } from '../../services/geminiService';
 import { SelectionCard, VariantCard } from '../Shared';
 import { useToast } from '../ui/Toast';
 import { supabase } from '../../lib/supabase';
@@ -36,14 +36,15 @@ export const WizardView: React.FC<WizardViewProps> = ({
     productData: {
       baseImage: undefined,
       userPrompt: '',
-      promoOption: undefined 
+      promoOption: undefined,
+      aiAnalysis: '' 
     }
   });
 
   // UI States
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [selectedPromoId, setSelectedPromoId] = useState<string>('none');
-  const [isAnalyzing, setIsAnalyzing] = useState(false); // New: Scanning effect
+  const [isAnalyzing, setIsAnalyzing] = useState(false); // True AI Analyzing
   const [analysisComplete, setAnalysisComplete] = useState(false);
 
   const [result, setResult] = useState<CampaignResult | null>(null);
@@ -86,13 +87,21 @@ export const WizardView: React.FC<WizardViewProps> = ({
   };
 
   // --- IMAGE UPLOAD LOGIC ---
-  const simulateAnalysis = () => {
-    setIsAnalyzing(true);
-    setTimeout(() => {
-        setIsAnalyzing(false);
-        setAnalysisComplete(true);
-        addToast("Imagen procesada por IA", "success");
-    }, 2500); // 2.5s simulated analysis
+  
+  const performRealAnalysis = async (base64Image: string) => {
+      setIsAnalyzing(true);
+      try {
+          // Llamada REAL a la IA
+          const analysis = await analyzeProductImage(base64Image);
+          updateProductData('aiAnalysis', analysis);
+          setAnalysisComplete(true);
+          addToast("IA: Producto identificado", "success");
+      } catch (e) {
+          console.error(e);
+          addToast("Error analizando imagen", "error");
+      } finally {
+          setIsAnalyzing(false);
+      }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -117,8 +126,10 @@ export const WizardView: React.FC<WizardViewProps> = ({
              const ctx = canvas.getContext('2d');
              if (ctx) {
                  ctx.drawImage(img, 0, 0, width, height);
-                 updateProductData('baseImage', canvas.toDataURL('image/jpeg', 0.8));
-                 simulateAnalysis();
+                 const processedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+                 updateProductData('baseImage', processedBase64);
+                 // TRIGGER REAL ANALYSIS
+                 performRealAnalysis(processedBase64);
              }
           };
           img.src = event.target?.result as string;
@@ -140,8 +151,9 @@ export const WizardView: React.FC<WizardViewProps> = ({
                 const blob = await res.blob();
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                    updateProductData('baseImage', reader.result as string);
-                    simulateAnalysis();
+                    const processedBase64 = reader.result as string;
+                    updateProductData('baseImage', processedBase64);
+                    performRealAnalysis(processedBase64);
                 };
                 reader.readAsDataURL(blob);
             }
@@ -189,7 +201,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
   const resetApp = () => {
     setState({
       step: 1, contentType: null, platform: null, visualStyle: null,
-      productData: { baseImage: undefined, userPrompt: '' } 
+      productData: { baseImage: undefined, userPrompt: '', aiAnalysis: '' } 
     });
     setSelectedSceneId(null); setSelectedPromoId('none');
     setResult(null); setQrSessionId(null); setUploadMethod('desktop');
@@ -226,18 +238,15 @@ export const WizardView: React.FC<WizardViewProps> = ({
 
           <div className="bg-white/5 backdrop-blur-lg p-8 rounded-3xl border border-white/10 space-y-6 shadow-2xl relative overflow-hidden">
              
-             {/* Scanning Effect Overlay */}
+             {/* REAL Scanning Effect Overlay */}
              {isAnalyzing && (
                  <div className="absolute inset-0 z-50 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm">
                      <div className="relative w-64 h-64 border-2 border-emerald-500/50 rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(16,185,129,0.2)]">
                         <img src={state.productData.baseImage} className="w-full h-full object-cover opacity-50" />
                         <div className="absolute top-0 left-0 w-full h-1 bg-emerald-400 shadow-[0_0_20px_rgba(16,185,129,1)] animate-[scan_2s_ease-in-out_infinite]"></div>
-                        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 gap-1 opacity-20">
-                            {[...Array(9)].map((_,i) => <div key={i} className="border border-emerald-500/30"></div>)}
-                        </div>
                      </div>
                      <p className="text-emerald-400 font-mono mt-6 animate-pulse flex items-center gap-2">
-                        <BrainCircuit size={18} /> ANALIZANDO GEOMETRÍA Y LUZ...
+                        <Loader2 size={18} className="animate-spin"/> GEMINI ANALIZANDO IMAGEN...
                      </p>
                  </div>
              )}
@@ -254,9 +263,12 @@ export const WizardView: React.FC<WizardViewProps> = ({
                       {state.productData.baseImage ? (
                         <div className="relative w-full h-64 overflow-hidden rounded-xl shadow-2xl border border-white/10">
                             <img src={state.productData.baseImage} alt="Preview" className="w-full h-full object-contain bg-black/50" />
-                            {analysisComplete && (
-                                <div className="absolute top-4 right-4 bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 shadow-lg animate-in zoom-in">
-                                    <CheckCircle size={12} /> IA Ready
+                            {analysisComplete && state.productData.aiAnalysis && (
+                                <div className="absolute bottom-4 left-4 right-4 bg-black/80 backdrop-blur-md text-white p-3 rounded-xl text-xs border border-white/20 animate-in slide-in-from-bottom-2">
+                                    <div className="flex items-center gap-2 text-emerald-400 font-bold mb-1">
+                                        <CheckCircle size={12} /> Detección Completada:
+                                    </div>
+                                    <p className="opacity-80 line-clamp-2">{state.productData.aiAnalysis}</p>
                                 </div>
                             )}
                         </div>
@@ -452,6 +464,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                 onClick={state.step === 4 ? handleGenerate : nextStep}
                 disabled={
                     (state.step === 1 && !state.productData.baseImage) || // Step 1: Needs image
+                    (state.step === 1 && isAnalyzing) || // Wait for analysis
                     (state.step === 2 && !state.contentType) ||          // Step 2: Needs Type
                     (state.step === 3 && !state.platform) ||             // Step 3: Needs Platform
                     (state.step === 4 && (!state.visualStyle || !selectedSceneId)) // Step 4: Needs Style & Scene
@@ -460,6 +473,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                     flex-1 rounded-xl font-bold text-white text-lg shadow-lg flex items-center justify-center gap-2 transition-all relative overflow-hidden
                     ${
                         ((state.step === 1 && !state.productData.baseImage) || 
+                         (state.step === 1 && isAnalyzing) ||
                         (state.step === 2 && !state.contentType) || 
                         (state.step === 3 && !state.platform) || 
                         (state.step === 4 && (!state.visualStyle || !selectedSceneId)))
@@ -471,7 +485,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
                     <span className="flex items-center gap-2">
                         Generar Magia <span className="text-xs bg-black/20 px-2 py-0.5 rounded-full flex items-center gap-1 border border-white/10"><Zap size={10} fill="currentColor"/> -{currentCost}</span>
                     </span>
-                ) : 'Continuar'}
+                ) : (isAnalyzing ? 'Analizando...' : 'Continuar')}
                 {state.step === 4 ? <Sparkles size={20} className="animate-pulse" /> : <ChevronRight size={24} />}
                 </button>
             )}
