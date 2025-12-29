@@ -19,11 +19,6 @@ const invokeAI = async (action: string, payload: any, retries = 1) => {
       throw new Error("El servidor de IA está tardando en responder.");
     }
 
-    if (data && data.error) {
-      console.warn(`API Logic Error (${action}):`, data.error);
-      throw new Error(data.error);
-    }
-
     return data;
   } catch (e: any) {
       throw e;
@@ -36,8 +31,8 @@ const invokeAI = async (action: string, payload: any, retries = 1) => {
 export const analyzeProductImage = async (imageBase64: string): Promise<string> => {
     try {
         console.log("👁️ Analizando imagen con Gemini Vision...");
-        const { analysis } = await invokeAI('analyze_image', { imageBase64 });
-        return analysis;
+        const data = await invokeAI('analyze_image', { imageBase64 });
+        return data?.analysis || "Producto detectado";
     } catch (e) {
         console.error("Error analizando imagen:", e);
         return "Producto genérico";
@@ -53,14 +48,14 @@ export const generateStrategicCopy = async (
     platform: Platform
 ): Promise<string> => {
     try {
-        const { text } = await invokeAI('generate_strategic_copy', {
+        const data = await invokeAI('generate_strategic_copy', {
             imageBase64,
             userContext,
             framework,
             tone,
             platform
         });
-        return text;
+        return data?.text || "No se pudo generar el texto.";
     } catch (e) {
         console.error(e);
         return "Error generando el copy estratégico.";
@@ -125,24 +120,29 @@ const generateVariantContent = async (
             plan 
         });
 
-        if (mediaResponse.error) {
-             console.warn(`⚠️ Error visual: ${mediaResponse.error}`);
-             mediaUrl = `https://placehold.co/1080x1350/000?text=Error`;
-        } else {
+        // Verificamos si hay error explícito en el body JSON
+        if (mediaResponse && mediaResponse.error) {
+             console.warn(`⚠️ Error visual reportado por API: ${mediaResponse.error}`);
+             // FALLBACK PLACEHOLDER: Usamos imagen de error para que no salga "undefined"
+             mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=Error+IA`;
+        } else if (mediaResponse && mediaResponse.url) {
              mediaUrl = mediaResponse.url;
              isVideoResult = mediaResponse.isVideo || false;
              debugPromptResult = mediaResponse.debugPrompt || "";
+        } else {
+             // Caso raro: respuesta vacía
+             mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=Fallo+Generacion`;
         }
 
     } catch (e: any) {
         console.error(`❌ Fallo en variante ${index}:`, e);
-        mediaUrl = `https://placehold.co/1080x1350/000?text=ErrorConnection`;
+        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=Error+Red`;
         debugPromptResult = "Error de conexión.";
     }
 
     return {
         id: `var-${Date.now()}-${index}`,
-        image: mediaUrl || "",
+        image: mediaUrl || "", // Aseguramos string vacío si es null
         isVideo: isVideoResult,
         copy: "Usa el generador de copy abajo 👇", // Placeholder limpio
         hashtags: [],

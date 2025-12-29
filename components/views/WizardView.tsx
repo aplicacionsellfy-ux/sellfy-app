@@ -91,14 +91,16 @@ export const WizardView: React.FC<WizardViewProps> = ({
   const performRealAnalysis = async (base64Image: string) => {
       setIsAnalyzing(true);
       try {
-          // Llamada REAL a la IA
           const analysis = await analyzeProductImage(base64Image);
           updateProductData('aiAnalysis', analysis);
           setAnalysisComplete(true);
           addToast("IA: Producto identificado", "success");
       } catch (e) {
           console.error(e);
-          addToast("Error analizando imagen", "error");
+          addToast("No se pudo analizar la imagen", "error");
+          // Fallback para no bloquear
+          updateProductData('aiAnalysis', "Producto general");
+          setAnalysisComplete(true);
       } finally {
           setIsAnalyzing(false);
       }
@@ -111,24 +113,32 @@ export const WizardView: React.FC<WizardViewProps> = ({
         addToast("Imagen muy pesada (Máx 15MB)", "error");
         return;
       }
+      
       const reader = new FileReader();
       reader.onload = (event) => {
           const img = new Image();
           img.onload = () => {
-             // Simple resize logic here if needed
              const canvas = document.createElement('canvas');
              let width = img.width;
              let height = img.height;
-             const MAX_SIZE = 1280; 
-             if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }} 
-             else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }}
-             canvas.width = width; canvas.height = height;
+             
+             // OPTIMIZATION: Aggressive resize for Edge Functions (Max 800px)
+             const MAX_SIZE = 800; 
+             if (width > height) { 
+                 if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+             } else { 
+                 if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+             }
+             
+             canvas.width = width; 
+             canvas.height = height;
              const ctx = canvas.getContext('2d');
              if (ctx) {
                  ctx.drawImage(img, 0, 0, width, height);
-                 const processedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+                 // OPTIMIZATION: Compress to 0.6 quality JPEG
+                 const processedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+                 
                  updateProductData('baseImage', processedBase64);
-                 // TRIGGER REAL ANALYSIS
                  performRealAnalysis(processedBase64);
              }
           };
@@ -145,19 +155,42 @@ export const WizardView: React.FC<WizardViewProps> = ({
         const { data, error } = await supabase.from('upload_sessions').insert({}).select().single();
         if (error) throw error;
         setQrSessionId(data.id);
-        supabase.channel(`upload-${data.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'upload_sessions', filter: `id=eq.${data.id}` }, async (payload) => {
+        
+        const channel = supabase.channel(`upload-${data.id}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'upload_sessions', filter: `id=eq.${data.id}` }, async (payload) => {
             if (payload.new.status === 'completed' && payload.new.image_url) {
-                const res = await fetch(payload.new.image_url);
-                const blob = await res.blob();
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const processedBase64 = reader.result as string;
+                // Descargar y procesar imagen remota
+                try {
+                    const res = await fetch(payload.new.image_url);
+                    const blob = await res.blob();
+                    // Convertir blob a base64 optimizado
+                    const imgBitmap = await createImageBitmap(blob);
+                    
+                    const canvas = document.createElement('canvas');
+                    let width = imgBitmap.width;
+                    let height = imgBitmap.height;
+                    const MAX_SIZE = 800;
+                    if (width > height) { 
+                        if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+                    } else { 
+                        if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+                    }
+                    canvas.width = width; canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(imgBitmap, 0, 0, width, height);
+                    const processedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+
                     updateProductData('baseImage', processedBase64);
                     performRealAnalysis(processedBase64);
-                };
-                reader.readAsDataURL(blob);
+                    addToast("Imagen recibida del celular", "success");
+                    supabase.removeChannel(channel);
+                } catch (err) {
+                    console.error("Error procesando imagen móvil", err);
+                    addToast("Error al procesar imagen remota", "error");
+                }
             }
         }).subscribe();
+
     } catch (e) {
         addToast("Error iniciando sesión remota", "error");
         setUploadMethod('desktop');
@@ -186,6 +219,8 @@ export const WizardView: React.FC<WizardViewProps> = ({
     
     try {
       const generated = await generateCampaign(stateWithData, businessSettings, subscription.plan);
+      if (!generated || generated.variants.length === 0) throw new Error("Generación vacía");
+      
       setResult(generated);
       onCampaignCreated(generated); 
       onDecrementCredit(currentCost); 
@@ -193,7 +228,7 @@ export const WizardView: React.FC<WizardViewProps> = ({
       addToast("¡Visuales generados!", "success");
     } catch (e: any) {
       console.error(e);
-      addToast("Error generando contenido.", "error");
+      addToast("Hubo un problema con la IA. Intenta con otra imagen.", "error");
       prevStep();
     }
   };

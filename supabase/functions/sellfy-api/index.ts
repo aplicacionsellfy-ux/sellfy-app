@@ -20,8 +20,7 @@ Deno.serve(async (req: Request) => {
     let payload;
     try {
         const rawBody = await req.text();
-        // Aumentamos límite de seguridad mentalmente, aunque Deno tiene sus propios límites
-        if (rawBody.length > 15 * 1024 * 1024) throw new Error("Payload muy grande (Max 15MB)");
+        if (rawBody.length > 20 * 1024 * 1024) throw new Error("Payload muy grande (Max 20MB)");
         payload = JSON.parse(rawBody);
     } catch (e) {
         throw new Error("JSON Inválido o Body muy grande: " + e.message);
@@ -29,45 +28,29 @@ Deno.serve(async (req: Request) => {
     
     const { action, ...data } = payload;
 
-    // --- 1. ANALIZAR IMAGEN (NUEVO: Real AI Vision) ---
+    // --- 1. ANALIZAR IMAGEN ---
     if (action === 'analyze_image') {
         const { imageBase64 } = data;
-        
         let cleanBase64 = imageBase64;
         let mimeType = 'image/jpeg';
-        
         if (imageBase64.includes(',')) {
             const parts = imageBase64.split(',');
             mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
             cleanBase64 = parts[1];
         }
 
-        const prompt = `
-            Describe this product image concisely for a professional photographer.
-            Identify:
-            1. The main object (what is it?).
-            2. Material and color.
-            3. Camera angle/perspective.
-            
-            Return the response in plain text, concise. Example: "A red leather sneaker, side view, white rubber sole."
-        `;
-
+        const prompt = "Describe main product, material and color. Concise.";
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash', // Multimodal model for analysis
-            contents: { parts: [
-                { inlineData: { mimeType: mimeType, data: cleanBase64 } },
-                { text: prompt }
-            ] }
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, { text: prompt }] }
         });
 
-        const analysis = response.text || "Producto no identificado claramente.";
-
-        return new Response(JSON.stringify({ analysis }), { 
+        return new Response(JSON.stringify({ analysis: response.text || "Producto detectado." }), { 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         });
     }
 
-    // --- 2. GENERAR IMAGEN (Edición Estricta con Contexto) ---
+    // --- 2. GENERAR IMAGEN ---
     if (action === 'generate_visual') {
         const { state, angle } = data;
         const { productData, visualStyle } = state;
@@ -78,63 +61,62 @@ Deno.serve(async (req: Request) => {
         const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
         const imageBase64 = parts[1];
 
-        // Construimos el prompt usando el ANÁLISIS PREVIO si existe
-        const context = productData.aiAnalysis 
-            ? `The product is: ${productData.aiAnalysis}.` 
-            : "The product is the main object in the foreground.";
-
+        // Prompt Simplificado para evitar bloqueos
         const promptText = `
-          Photo Editing Task.
+          Generate a product photography image.
+          Subject: ${productData.aiAnalysis || 'A product'}
+          Setting: ${productData.userPrompt}
+          Style: ${visualStyle}, ${angle}
           
-          ${context}
-          
-          Instruction: CHANGE THE BACKGROUND.
-          1. KEEP THE PRODUCT (${productData.aiAnalysis || 'Foreground object'}) EXACTLY AS IS. Do not warp it.
-          2. Place it in this setting: "${productData.userPrompt}".
-          3. Style: ${visualStyle}.
-          4. Composition: ${angle}.
-          5. Blend the product naturally with realistic lighting and shadows cast on the new background.
-          
-          ${productData.promoOption ? `6. (Optional) If it fits naturally, include a minimal text element saying: "${productData.promoOption}"` : ""}
+          Important: The product must be the main focus. High quality, photorealistic.
         `;
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image', // Modelo especializado en edición/generación de imagen
-            contents: { parts: [
-                { inlineData: { mimeType, data: imageBase64 } },
-                { text: promptText }
-            ] },
-            config: {
-                temperature: 0.4, 
-                topK: 32
-            }
-        });
+        // Intentamos generar con gemini-2.5-flash-image
+        // NOTA: Para imagen-a-imagen simple sin máscara, pasamos la imagen como referencia
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: { parts: [
+                    { inlineData: { mimeType, data: imageBase64 } },
+                    { text: promptText }
+                ] },
+                config: {
+                    temperature: 0.3
+                }
+            });
 
-        let b64 = null;
-        if (response.candidates?.[0]?.content?.parts) {
-            for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData) {
-                    b64 = part.inlineData.data;
-                    break;
+            let b64 = null;
+            if (response.candidates?.[0]?.content?.parts) {
+                for (const part of response.candidates[0].content.parts) {
+                    if (part.inlineData) {
+                        b64 = part.inlineData.data;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (b64) {
-            return new Response(JSON.stringify({ 
-                url: `data:image/png;base64,${b64}`,
-                isVideo: false,
-                debugPrompt: promptText 
-            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            if (b64) {
+                return new Response(JSON.stringify({ 
+                    url: `data:image/png;base64,${b64}`,
+                    isVideo: false,
+                    debugPrompt: promptText 
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            }
+        } catch (genError) {
+            console.error("Gemini Image Gen failed:", genError);
+            // Fallthrough to error return
         }
         
-        throw new Error("La IA no generó imagen. Intenta otra vez.");
+        // Si llegamos aquí, falló la generación. Retornamos JSON de error controlado.
+        // NO lanzamos throw para que el cliente pueda manejarlo y mostrar placeholder.
+        return new Response(JSON.stringify({ 
+            error: "La IA no pudo generar la imagen. Posiblemente por filtros de seguridad o complejidad."
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- 3. GENERAR COPY ESTRATÉGICO ---
+    // --- 3. GENERAR COPY ---
     if (action === 'generate_strategic_copy') {
         const { imageBase64, userContext, framework, tone, platform } = data;
-        
         let cleanBase64 = imageBase64;
         let mimeType = 'image/jpeg';
         if (imageBase64.includes(',')) {
@@ -143,28 +125,16 @@ Deno.serve(async (req: Request) => {
             cleanBase64 = parts[1];
         }
 
-        const prompt = `
-          Actúa como un Copywriter Senior experto en ${platform}.
-          TAREA: Escribe un texto persuasivo para vender el producto que ves en la imagen.
-          CONTEXTO DEL PRODUCTO: ${userContext}
-          FRAMEWORK DE VENTAS: ${framework}
-          TONO DE VOZ: ${tone}
-          
-          REGLAS: Español Neutro. Emojis estratégicos. Formato legible. Añade hashtags.
-        `;
-
+        const prompt = `Write a short ${platform} post about ${userContext}. Tone: ${tone}. Use ${framework}. Language: Spanish.`;
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash', 
-            contents: { parts: [
-                { inlineData: { mimeType: mimeType, data: cleanBase64 } },
-                { text: prompt }
-            ] },
+            contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, { text: prompt }] },
         });
 
         return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- 4. ANIMAR IMAGEN (VEO) ---
+    // --- 4. ANIMAR IMAGEN ---
     if (action === 'animate_image') {
         const { image } = data;
         const parts = image.split(',');
@@ -202,7 +172,7 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     console.error("Server Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 200, 
+      status: 200, // Return 200 so client can parse JSON error
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
