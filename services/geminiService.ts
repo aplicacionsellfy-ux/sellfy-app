@@ -52,8 +52,8 @@ export const generateStrategicCopy = async (
         // Si no hay imagen base, enviamos un string vacío para que la API no falle
         const safeImage = imageBase64 || "";
         const data = await invokeAI('generate_strategic_copy', {
-            imageBase64: safeImage.substring(0, 100) + "...", // Fake truncated for log, actual call handles it
-            fullImage: safeImage, // Pass logic in edge function needs adjustment if we want to support this
+            imageBase64: safeImage.substring(0, 100) + "...", // Fake truncated for log
+            fullImage: safeImage, 
             userContext,
             framework,
             tone,
@@ -121,7 +121,7 @@ const generateVariantContent = async (
   angle: string, 
   state: WizardState, 
   settings: BusinessSettings, 
-  plan: PlanTier
+  _plan: PlanTier // Renombrado a _plan para indicar que no se usa directamente por ahora
 ): Promise<ContentVariant> => {
     
     let mediaUrl: string;
@@ -140,13 +140,6 @@ const generateVariantContent = async (
     try {
         // Usamos un placeholder mientras carga si falla la API
         copyText = `🔥 ${state.productData.name || 'Nuevo Lanzamiento'} \n\n${state.productData.benefit || 'Descubre la calidad que mereces.'} \n\n📍 ${settings.website || 'Link en bio'}`;
-        
-        // Intentamos mejorarlo con Gemini si hay conexión
-        /* 
-           Nota: Podríamos llamar a generateStrategicCopy aquí, pero para velocidad
-           usamos el template base y dejamos que el usuario use el botón "Generar Copy" 
-           en la tarjeta para gastar tokens solo cuando quiera.
-        */
     } catch (e) {
         console.warn("Error en texto base");
     }

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, CreditCard, Smartphone, Globe, Video as VideoIcon, Loader2, Play, Pause, Lock, Layers, Sparkles, PenTool, FileText, Image as ImageIcon } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, Video as VideoIcon, Loader2, Layers, Sparkles, PenTool, FileText, Image as ImageIcon } from 'lucide-react';
 import { ContentVariant, PlanDetails, CopyFramework, Platform } from '../types';
 import { COPY_FRAMEWORKS } from '../constants';
 import { useToast } from './ui/Toast';
@@ -125,11 +125,11 @@ export const FullScreenModal: React.FC<{
   );
 };
 
-// Payment Modal (Abbreviated for brevity, logic remains same)
+// Payment Modal
 export const PaymentModal: React.FC<{ isOpen: boolean; onClose: () => void; plan: PlanDetails | null; onConfirm: () => Promise<void>; }> = ({ isOpen, onClose, plan, onConfirm }) => {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'method' | 'form' | 'processing' | 'success'>('method');
-  // ... (Keeping existing logic for payment modal, just ensuring it compiles)
+  // ... (Abbreviated logic for brevity as per previous implementation)
   useEffect(() => { if (isOpen) { setStep('method'); setLoading(false); } }, [isOpen]);
   if (!isOpen || !plan) return null;
   const handleProcess = async () => { setLoading(true); setStep('processing'); setTimeout(async () => { await onConfirm(); setStep('success'); setLoading(false); setTimeout(onClose, 2000); }, 2000); };
@@ -159,7 +159,7 @@ export const SelectionCard: React.FC<SelectionCardProps> = ({ selected, onClick,
   </div>
 );
 
-// Variant Card Component (Improved Image Handling)
+// Variant Card Component
 export const VariantCard: React.FC<{ 
   variant: ContentVariant; 
   onView: (img: string) => void;
@@ -231,14 +231,12 @@ export const VariantCard: React.FC<{
             <video src={activeMediaUrl} className="w-full h-full object-cover" loop muted autoPlay playsInline />
         ) : (
             <>
-                {/* Image Loader */}
                 {!imageLoaded && !imageError && (
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
                         <Loader2 className="text-indigo-500 animate-spin" />
                     </div>
                 )}
                 
-                {/* Error Fallback */}
                 {imageError && (
                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-slate-500 p-4 text-center">
                         <ImageIcon size={32} className="mb-2 opacity-50"/>
