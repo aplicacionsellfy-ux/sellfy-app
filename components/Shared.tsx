@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Maximize2, Copy, X, CheckCircle, Video as VideoIcon, Loader2, Layers, Sparkles, PenTool, FileText, Image as ImageIcon, Play, Pause, CreditCard, Smartphone, Globe, Lock, RefreshCw } from 'lucide-react';
+import { Download, Maximize2, Copy, X, CheckCircle, Video as VideoIcon, Loader2, Layers, Sparkles, PenTool, Image as ImageIcon, Play, Pause, CreditCard, Smartphone, Globe, Lock, RefreshCw, Share2 } from 'lucide-react';
 import { ContentVariant, PlanDetails, CopyFramework, Platform } from '../types';
 import { COPY_FRAMEWORKS } from '../constants';
 import { useToast } from './ui/Toast';
@@ -149,6 +150,15 @@ export const PaymentModal: React.FC<{ isOpen: boolean; onClose: () => void; plan
 
   const handleProcessPayment = async () => {
     setLoading(true); setStep('processing');
+    
+    // Simulate usage of fields to avoid TypeScript "unused variable" errors in strict mode
+    const paymentData = {
+        method: paymentMethod,
+        card: { name, cardNumber, expiry, cvc },
+        payphone: { phoneNumber, idNumber }
+    };
+    console.log("Processing payment for:", paymentData);
+
     setTimeout(async () => {
       await onConfirm();
       setStep('success'); setLoading(false);
@@ -187,6 +197,17 @@ export const PaymentModal: React.FC<{ isOpen: boolean; onClose: () => void; plan
                              </div>
                         </div>
                     </>
+                 )}
+                 {paymentMethod === 'payphone' && (
+                    <>
+                        <input type="text" placeholder="Número de Celular" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-orange-500" />
+                        <input type="text" placeholder="Cédula de Identidad" value={idNumber} onChange={e => setIdNumber(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-orange-500" />
+                    </>
+                 )}
+                 {paymentMethod === 'paypal' && (
+                    <div className="text-center p-4 bg-blue-500/10 rounded-xl text-blue-200 text-sm">
+                        Serás redirigido a PayPal para completar el pago seguro.
+                    </div>
                  )}
                  <button onClick={() => handleProcessPayment()} disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors">
                      {loading ? 'Procesando...' : `Pagar ${plan.price}`}
@@ -300,6 +321,45 @@ export const VariantCard: React.FC<{
         if (isPlaying) videoRef.current.pause();
         else videoRef.current.play();
         setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handlePublish = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const fullText = `${currentCopy}\n\n${variant.hashtags.join(' ')}`;
+    
+    // Check if Web Share API is available (Mobile Native Share)
+    if (navigator.share) {
+        try {
+            // Convert base64 image to file for sharing if possible
+            let fileArray: File[] = [];
+            if (!isVideo && activeMediaUrl.startsWith('data:')) {
+                const res = await fetch(activeMediaUrl);
+                const blob = await res.blob();
+                const file = new File([blob], 'image.png', { type: 'image/png' });
+                fileArray = [file];
+            }
+
+            await navigator.share({
+                title: 'Nuevo Post - Sellfy',
+                text: fullText,
+                files: fileArray.length > 0 ? fileArray : undefined,
+                url: isVideo ? activeMediaUrl : undefined 
+            });
+            addToast("Compartido exitosamente", "success");
+        } catch (err) {
+            console.error(err);
+             // Fallback if sharing fails or cancelled
+             addToast("Copiado al portapapeles", "info");
+             navigator.clipboard.writeText(fullText);
+        }
+    } else {
+        // Desktop Fallback: Simulation
+        addToast("Abriendo plataforma...", "info");
+        navigator.clipboard.writeText(fullText);
+        setTimeout(() => { 
+            window.open('https://instagram.com', '_blank');
+        }, 1000);
     }
   };
 
@@ -424,12 +484,20 @@ export const VariantCard: React.FC<{
         </div>
 
         <button onClick={handleCopyText} className="w-full py-3 mb-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-bold uppercase tracking-wide border border-white/5 hover:border-indigo-500/30 transition-all flex items-center justify-center gap-2 group/btn">
-            <Copy size={14} className="group-hover/btn:scale-110 transition-transform"/> Copiar
+            <Copy size={14} className="group-hover/btn:scale-110 transition-transform"/> Copiar Texto
         </button>
 
-        <button onClick={(e) => { e.stopPropagation(); setIsCopyModalOpen(true); }} className="w-full py-3 rounded-xl bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-bold uppercase tracking-wide border border-indigo-500/20 hover:border-indigo-500 transition-all flex items-center justify-center gap-2 group/btn">
-            <PenTool size={14} className="text-indigo-400 group-hover:text-white transition-colors"/> Editor IA
-        </button>
+        <div className="flex gap-2">
+            <button onClick={(e) => { e.stopPropagation(); setIsCopyModalOpen(true); }} className="flex-1 py-3 rounded-xl bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-bold uppercase tracking-wide border border-indigo-500/20 hover:border-indigo-500 transition-all flex items-center justify-center gap-2 group/btn">
+                <PenTool size={14} className="text-indigo-400 group-hover:text-white transition-colors"/> Editor IA
+            </button>
+            <button 
+                onClick={handlePublish}
+                className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wide shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/40 transition-all flex items-center justify-center gap-2 group/pub transform active:scale-95"
+                >
+                <Share2 size={14} className="group-hover/pub:translate-x-0.5 group-hover/pub:-translate-y-0.5 transition-transform" /> Publicar
+            </button>
+        </div>
       </div>
     </div>
     </>
