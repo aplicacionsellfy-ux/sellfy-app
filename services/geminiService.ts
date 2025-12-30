@@ -1,4 +1,3 @@
-
 import { supabase } from "../lib/supabase";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier, ContentType, Platform, CopyFramework } from "../types";
 
@@ -82,21 +81,23 @@ export const generateStrategicCopy = async (
     }
 };
 
-// 3. Generar Copy para Variante (Wizard) - Adaptado para usar 'generate_strategic_copy'
+// 3. Generar Copy para Variante (Wizard) - CORREGIDO
 export const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
   try {
     const userContext = `Producto: ${state.productData.name}. Beneficio: ${state.productData.benefit}. Contexto visual: ${angleDescription}`;
     
+    // CORRECCIÓN: Usar 'generate_strategic_copy' en lugar de 'generate_copy'
     const result = await invokeAI('generate_strategic_copy', {
       userContext,
       framework: CopyFramework.AIDA,
-      tone: settings.tone,
-      platform: state.platform
+      tone: settings.tone || 'Profesional',
+      platform: state.platform || Platform.IG_FEED
     });
     
-    // El backend ahora devuelve { text: string }, adaptamos a la interfaz esperada
+    // Adaptar respuesta del backend { text: string } a lo que espera el frontend
     const fullText = result.text || "";
-    // Extracción simple de hashtags si están al final
+    
+    // Extracción simple de hashtags
     const hashtags = fullText.match(/#[a-z0-9_]+/gi) || ["#sellfy", "#viral"];
     const copy = fullText.replace(/#[a-z0-9_]+/gi, "").trim();
 
@@ -104,15 +105,16 @@ export const generateVariantCopy = async (state: WizardState, settings: Business
   } catch (error) {
     console.warn("Fallo en generación de copy, usando fallback local:", error);
     return { 
-      copy: `${state.productData.name} - ${state.productData.benefit} 🔥\n\n${state.productData.description || ''}`, 
+      copy: `${state.productData.name} - ${state.productData.benefit} 🔥`, 
       hashtags: ["#sellfy", "#viral", "#trending"] 
     };
   }
 };
 
-// 4. Regenerar solo texto - Adaptado
+// 4. Regenerar solo texto - CORREGIDO
 export const regenerateCopyOnly = async (productName: string, platform: string, tone: string): Promise<string> => {
   try {
+    // CORRECCIÓN: Usar 'generate_strategic_copy' en lugar de 'regenerate_copy'
     const { text } = await invokeAI('generate_strategic_copy', {
       userContext: productName,
       framework: CopyFramework.PAS,
@@ -177,20 +179,21 @@ const generateVariantContent = async (index: number, angle: string, state: Wizar
             invokeAI('generate_visual', {
                 state: { ...state, productData: { ...state.productData, baseImage: optimizedBase } },
                 angle,
-                plan,
-                isVideoRequest
+                plan, // (Opcional) Backend lo recibe pero no lo usa aún
+                isVideoRequest // (Opcional)
             }),
             generateVariantCopy(state, settings, angle)
         ]);
 
         mediaUrl = mediaResponse.url;
-        isVideoResult = mediaResponse.isVideo;
+        isVideoResult = mediaResponse.isVideo || false;
         textData = copyResponse;
 
     } catch (e) {
         console.error("Fallo generando variante:", e);
         // Fallback visual si falla la IA
-        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name || 'Error')}`;
+        const safeName = encodeURIComponent(productData.name || 'Producto');
+        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${safeName}`;
         
         // Intentamos recuperar texto aunque falle la imagen
         textData = await generateVariantCopy(state, settings, angle).catch(() => ({ copy: productData.name || "Producto", hashtags: [] }));
@@ -215,7 +218,7 @@ export const generateCampaign = async (state: WizardState, settings: BusinessSet
 
   const variants: ContentVariant[] = [];
   
-  // Generación secuencial
+  // Generación secuencial para estabilidad
   for (let i = 0; i < angles.length; i++) {
       const variant = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(variant);
