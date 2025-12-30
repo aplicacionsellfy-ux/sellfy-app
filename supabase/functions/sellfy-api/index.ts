@@ -1,6 +1,6 @@
 
 // @ts-nocheck
-import { GoogleGenAI, Type } from "https://esm.sh/@google/genai";
+import { GoogleGenAI } from "https://esm.sh/@google/genai";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,143 +8,160 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
+  // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
     const apiKey = Deno.env.get('API_KEY');
-    if (!apiKey) throw new Error("Falta API Key");
+    if (!apiKey) throw new Error("Falta API Key del servidor");
+    
     const ai = new GoogleGenAI({ apiKey });
     
+    // Parse Payload
     let payload;
     try {
         const rawBody = await req.text();
-        if (rawBody.length > 20 * 1024 * 1024) throw new Error("Payload muy grande (Max 20MB)");
         payload = JSON.parse(rawBody);
     } catch (e) {
-        throw new Error("JSON Inválido o Body muy grande: " + e.message);
+        throw new Error("Error parseando body JSON: " + e.message);
     }
     
     const { action, ...data } = payload;
 
-    // --- 1. ANALIZAR IMAGEN ---
-    if (action === 'analyze_image') {
-        const { imageBase64 } = data;
-        let cleanBase64 = imageBase64;
-        let mimeType = 'image/jpeg';
-        if (imageBase64.includes(',')) {
-            const parts = imageBase64.split(',');
-            mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-            cleanBase64 = parts[1];
-        }
-
-        const prompt = "Describe main product, material and color. Concise.";
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, { text: prompt }] }
-        });
-
-        return new Response(JSON.stringify({ analysis: response.text || "Producto detectado." }), { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        });
-    }
-
-    // --- 2. GENERAR IMAGEN ---
+    // -----------------------------------------------------------
+    // 1. GENERAR IMAGEN (IMAGE-TO-IMAGE REAL)
+    // -----------------------------------------------------------
     if (action === 'generate_visual') {
         const { state, angle } = data;
         const { productData, visualStyle } = state;
 
-        if (!productData.baseImage) throw new Error("Se requiere imagen base.");
+        if (!productData.baseImage) throw new Error("Falta la imagen base del producto.");
 
-        const parts = productData.baseImage.split(',');
-        const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
-        const imageBase64 = parts[1];
-
-        // Prompt Simplificado para evitar bloqueos
-        const promptText = `
-          Generate a product photography image.
-          Subject: ${productData.aiAnalysis || 'A product'}
-          Setting: ${productData.userPrompt}
-          Style: ${visualStyle}, ${angle}
-          
-          Important: The product must be the main focus. High quality, photorealistic.
-        `;
-
-        // Intentamos generar con gemini-2.5-flash-image
-        // NOTA: Para imagen-a-imagen simple sin máscara, pasamos la imagen como referencia
-        try {
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image',
-                contents: { parts: [
-                    { inlineData: { mimeType, data: imageBase64 } },
-                    { text: promptText }
-                ] },
-                config: {
-                    temperature: 0.3
-                }
-            });
-
-            let b64 = null;
-            if (response.candidates?.[0]?.content?.parts) {
-                for (const part of response.candidates[0].content.parts) {
-                    if (part.inlineData) {
-                        b64 = part.inlineData.data;
-                        break;
-                    }
-                }
-            }
-
-            if (b64) {
-                return new Response(JSON.stringify({ 
-                    url: `data:image/png;base64,${b64}`,
-                    isVideo: false,
-                    debugPrompt: promptText 
-                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-            }
-        } catch (genError) {
-            console.error("Gemini Image Gen failed:", genError);
-            // Fallthrough to error return
-        }
-        
-        // Si llegamos aquí, falló la generación. Retornamos JSON de error controlado.
-        // NO lanzamos throw para que el cliente pueda manejarlo y mostrar placeholder.
-        return new Response(JSON.stringify({ 
-            error: "La IA no pudo generar la imagen. Posiblemente por filtros de seguridad o complejidad."
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // --- 3. GENERAR COPY ---
-    if (action === 'generate_strategic_copy') {
-        const { imageBase64, userContext, framework, tone, platform } = data;
-        let cleanBase64 = imageBase64;
+        // Limpiar Base64 (remover header data:image/...)
+        let imageBase64 = productData.baseImage;
         let mimeType = 'image/jpeg';
         if (imageBase64.includes(',')) {
             const parts = imageBase64.split(',');
             mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-            cleanBase64 = parts[1];
+            imageBase64 = parts[1];
         }
 
-        const prompt = `Write a short ${platform} post about ${userContext}. Tone: ${tone}. Use ${framework}. Language: Spanish.`;
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash', 
-            contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, { text: prompt }] },
-        });
+        // Prompt Directo y Claro
+        const context = productData.userPrompt || "Professional studio lighting";
+        const prompt = `
+            Generate a high-quality, photorealistic product image based on the input image provided.
+            The product is: ${productData.name || 'the item in the image'}.
+            
+            Action: Place this exact product into a new environment.
+            Environment: ${context}, ${visualStyle} style.
+            Camera Angle: ${angle}.
+            Lighting: Professional, cinematic, high contrast.
+            
+            Important: Maintain the visual identity of the product but upgrade the quality and background.
+            Output: A single high-resolution image.
+        `;
 
-        return new Response(JSON.stringify({ text: response.text }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        try {
+            // Llamada a Gemini 2.5 Flash Image (Multimodal In -> Multimodal Out)
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: {
+                    parts: [
+                        { text: prompt },
+                        { inlineData: { mimeType, data: imageBase64 } } // Enviamos la foto original
+                    ]
+                },
+                config: {
+                    // Importante: No ponemos responseMimeType: 'application/json' porque queremos una imagen binaria en la respuesta
+                    temperature: 0.3, // Baja temperatura para mantener fidelidad al producto
+                }
+            });
+
+            // Extraer la imagen de la respuesta
+            let generatedImageBase64 = null;
+            
+            // La respuesta puede traer texto Y/O imagen. Iteramos para encontrar la imagen.
+            const candidates = response.candidates;
+            if (candidates && candidates.length > 0) {
+                const parts = candidates[0].content.parts;
+                for (const part of parts) {
+                    if (part.inlineData && part.inlineData.data) {
+                        generatedImageBase64 = part.inlineData.data;
+                        break; // Encontramos la imagen
+                    }
+                }
+            }
+
+            if (!generatedImageBase64) {
+                 // Si Gemini devolvió solo texto (explicando por qué no pudo, o alucinando), lo loggeamos
+                 const textResponse = candidates?.[0]?.content?.parts?.[0]?.text || "No content";
+                 console.log("Gemini devolvió texto en vez de imagen:", textResponse);
+                 throw new Error("La IA no generó imagen visual. Respuesta: " + textResponse.substring(0, 100));
+            }
+
+            return new Response(JSON.stringify({ 
+                url: `data:image/png;base64,${generatedImageBase64}`,
+                isVideo: false
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+        } catch (genError) {
+            console.error("Error en Gemini Generation:", genError);
+            throw new Error("Fallo en generación visual: " + genError.message);
+        }
     }
 
-    // --- 4. ANIMAR IMAGEN ---
+    // -----------------------------------------------------------
+    // 2. ANALIZAR IMAGEN (VISION)
+    // -----------------------------------------------------------
+    if (action === 'analyze_image') {
+        const { imageBase64 } = data;
+        let cleanBase64 = imageBase64.split(',')[1] || imageBase64;
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash', // Modelo solo texto para analisis
+            contents: { 
+                parts: [
+                    { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } }, 
+                    { text: "Analyze this product image. Return 1 sentence describing the product type, material, and color for a prompt." } 
+                ] 
+            }
+        });
+        
+        return new Response(JSON.stringify({ analysis: response.text }), { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
+    // -----------------------------------------------------------
+    // 3. GENERAR TEXTO (COPY)
+    // -----------------------------------------------------------
+    if (action === 'generate_strategic_copy') {
+        const { userContext, framework, tone, platform } = data;
+        const prompt = `Write a ${platform} caption for ${userContext} using ${framework} framework. Tone: ${tone}. Language: Spanish. Include hashtags.`;
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: prompt }] }
+        });
+
+        return new Response(JSON.stringify({ text: response.text }), { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+    }
+
+    // -----------------------------------------------------------
+    // 4. ANIMAR (VIDEO)
+    // -----------------------------------------------------------
     if (action === 'animate_image') {
         const { image } = data;
-        const parts = image.split(',');
-        const mimeType = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
-        const imageBytes = parts[1];
-
+        const cleanBase64 = image.split(',')[1] || image;
+        
         const operation = await ai.models.generateVideos({
             model: 'veo-3.1-fast-generate-preview',
-            image: { imageBytes, mimeType },
-            prompt: "Cinematic product showcase, slow camera pan, professional lighting, 4k advertising.",
+            image: { imageBytes: cleanBase64, mimeType: 'image/png' },
+            prompt: "Cinematic product showcase, slow motion, 4k lighting",
             config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '9:16' }
         });
 
@@ -153,26 +170,26 @@ Deno.serve(async (req: Request) => {
         });
     }
 
-    // --- 5. POLLING VIDEO ---
     if (action === 'get_video_operation') {
         const { operationName } = data;
         const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
         let videoUri = null;
-        let done = false;
+        
         if (operation.done) {
-            done = true;
-            const vid = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
-            if (vid?.video?.uri) videoUri = `${vid.video.uri}&key=${apiKey}`;
+             const vid = operation.response?.generatedVideos?.[0] || operation.result?.generatedVideos?.[0];
+             if (vid?.video?.uri) videoUri = `${vid.video.uri}&key=${apiKey}`;
         }
-        return new Response(JSON.stringify({ done, videoUri }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ done: operation.done, videoUri }), { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
     }
 
-    return new Response(JSON.stringify({ error: "Acción desconocida" }), { headers: corsHeaders });
+    throw new Error("Acción no reconocida");
 
   } catch (error) {
-    console.error("Server Error:", error);
+    console.error("API Error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 200, // Return 200 so client can parse JSON error
+      status: 200, // Devolvemos 200 con error JSON para que el frontend lo parsee
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
