@@ -4,7 +4,7 @@ import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier
 
 // --- HELPER: Invocador Seguro ---
 
-const invokeAI = async (action: string, payload: any, retries = 1) => {
+const invokeAI = async (action: string, payload: any, retries = 1): Promise<any> => {
   try {
     const { data, error } = await supabase.functions.invoke('sellfy-api', {
       body: { action, ...payload }
@@ -71,7 +71,7 @@ export const regenerateCopyOnly = async (
   _tone: string,
   _plan: PlanTier = 'free'
 ): Promise<string> => {
-    return "Texto regenerado con IA estratégica.";
+    return "Texto regenerado con IA estratégica. Descubre más en nuestro perfil.";
 };
 
 // 2. Animación de Video (Veo)
