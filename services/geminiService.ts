@@ -1,3 +1,4 @@
+
 import { supabase } from "../lib/supabase";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier, ContentType, Platform, CopyFramework } from "../types";
 
@@ -26,7 +27,7 @@ const optimizeImageForUpload = async (base64Str: string): Promise<string> => {
 
 // --- HELPER: Invocador Seguro ---
 
-const invokeAI = async (action: string, payload: any, retries = 0): Promise<any> => {
+const invokeAI = async (action: string, payload: any): Promise<any> => {
   try {
     const { data, error } = await supabase.functions.invoke('sellfy-api', {
       body: { action, ...payload }
@@ -61,7 +62,7 @@ export const analyzeProductImage = async (imageBase64: string): Promise<string> 
 };
 
 export const generateStrategicCopy = async (
-    imageBase64: string, 
+    _imageBase64: string, 
     userContext: string,
     framework: CopyFramework,
     tone: string,
@@ -121,7 +122,8 @@ const generateVariantContent = async (
   index: number, 
   angle: string, 
   state: WizardState, 
-  settings: BusinessSettings
+  settings: BusinessSettings,
+  plan: PlanTier
 ): Promise<ContentVariant> => {
     
     let mediaUrl: string;
@@ -134,7 +136,8 @@ const generateVariantContent = async (
         console.log(`Generando visual ${index}...`);
         const visualResponse = await invokeAI('generate_visual', {
             state: { ...state, productData: { ...state.productData, baseImage: optimizedBase } }, // Enviar optimizada
-            angle
+            angle,
+            plan // Enviamos el plan al backend por si se requiere lógica diferente (ej. HD vs SD)
         });
         
         mediaUrl = visualResponse.url;
@@ -188,7 +191,7 @@ export const generateCampaign = async (
   
   // Procesamiento secuencial para evitar timeouts multiples y rate limits
   for (let i = 0; i < angles.length; i++) {
-      const v = await generateVariantContent(i, angles[i], state, settings);
+      const v = await generateVariantContent(i, angles[i], state, settings, plan);
       variants.push(v);
   }
 
