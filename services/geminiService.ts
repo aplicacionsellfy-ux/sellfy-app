@@ -2,9 +2,31 @@
 import { supabase } from "../lib/supabase";
 import { WizardState, CampaignResult, ContentVariant, BusinessSettings, PlanTier, ContentType, Platform, CopyFramework } from "../types";
 
+// --- HELPER: Invocador Seguro ---
+
+const invokeAI = async (action: string, payload: any) => {
+  console.log(`📡 Llamando a Edge Function: ${action}`);
+  
+  // Llama a la Edge Function 'sellfy-api' desplegada en Supabase
+  const { data, error } = await supabase.functions.invoke('sellfy-api', {
+    body: { action, ...payload }
+  });
+
+  if (error) {
+    console.error(`Edge Function Error (${action}):`, error);
+    // Si el error es de conexión o timeout, damos un mensaje amigable
+    throw new Error("Error de conexión con el servidor de IA. Por favor intenta de nuevo.");
+  }
+
+  // Si la función devuelve un error explícito en el JSON
+  if (data && data.error) {
+    throw new Error(data.error);
+  }
+
+  return data;
+};
+
 // --- HELPER: Image Optimizer ---
-// Supabase Functions tienen limite de body size (6MB).
-// Redimensionamos la imagen antes de enviarla.
 const optimizeImageForUpload = async (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new Image();
@@ -25,32 +47,9 @@ const optimizeImageForUpload = async (base64Str: string): Promise<string> => {
     });
 };
 
-// --- HELPER: Invocador Seguro ---
-
-const invokeAI = async (action: string, payload: any): Promise<any> => {
-  try {
-    const { data, error } = await supabase.functions.invoke('sellfy-api', {
-      body: { action, ...payload }
-    });
-
-    if (error) {
-      console.warn(`Edge Function Warning (${action}):`, error);
-      throw new Error("Error de conexión con el servidor de IA.");
-    }
-
-    if (data && data.error) {
-       throw new Error(data.error);
-    }
-
-    return data;
-  } catch (e: any) {
-      console.error(`Error en ${action}:`, e);
-      throw e;
-  }
-};
-
 // --- SERVICIOS ---
 
+// 1. Analizar Imagen (Vision)
 export const analyzeProductImage = async (imageBase64: string): Promise<string> => {
     try {
         const optimizedImage = await optimizeImageForUpload(imageBase64);
@@ -61,8 +60,9 @@ export const analyzeProductImage = async (imageBase64: string): Promise<string> 
     }
 };
 
+// 2. Generar Copy Estratégico (Modal Compartido)
 export const generateStrategicCopy = async (
-    _imageBase64: string, 
+    _imageBase64: string, // Unused but kept for interface compatibility if needed
     userContext: string,
     framework: CopyFramework,
     tone: string,
@@ -70,7 +70,7 @@ export const generateStrategicCopy = async (
 ): Promise<string> => {
     try {
         const data = await invokeAI('generate_strategic_copy', {
-            imageBase64: "", // No enviamos imagen para copy para ahorrar ancho de banda, usamos el contexto
+            // No enviamos imagen para copy para ahorrar ancho de banda
             userContext,
             framework,
             tone,
@@ -82,117 +82,143 @@ export const generateStrategicCopy = async (
     }
 };
 
-export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
-    try {
-        const optimizedImage = await optimizeImageForUpload(imageBase64);
-        const response = await invokeAI('animate_image', { image: optimizedImage });
-        if (!response?.operationName) return null;
-        
-        // Polling
-        let attempts = 0;
-        while (attempts < 15) {
-            await new Promise(r => setTimeout(r, 5000));
-            attempts++;
-            const status = await invokeAI('get_video_operation', { operationName: response.operationName });
-            if (status?.done && status?.videoUri) return status.videoUri;
-        }
-        return null;
-    } catch {
-        return null;
-    }
+// 3. Generar Copy para Variante (Wizard) - Adaptado para usar 'generate_strategic_copy'
+export const generateVariantCopy = async (state: WizardState, settings: BusinessSettings, angleDescription: string): Promise<{ copy: string, hashtags: string[] }> => {
+  try {
+    const userContext = `Producto: ${state.productData.name}. Beneficio: ${state.productData.benefit}. Contexto visual: ${angleDescription}`;
+    
+    const result = await invokeAI('generate_strategic_copy', {
+      userContext,
+      framework: CopyFramework.AIDA,
+      tone: settings.tone,
+      platform: state.platform
+    });
+    
+    // El backend ahora devuelve { text: string }, adaptamos a la interfaz esperada
+    const fullText = result.text || "";
+    // Extracción simple de hashtags si están al final
+    const hashtags = fullText.match(/#[a-z0-9_]+/gi) || ["#sellfy", "#viral"];
+    const copy = fullText.replace(/#[a-z0-9_]+/gi, "").trim();
+
+    return { copy, hashtags };
+  } catch (error) {
+    console.warn("Fallo en generación de copy, usando fallback local:", error);
+    return { 
+      copy: `${state.productData.name} - ${state.productData.benefit} 🔥\n\n${state.productData.description || ''}`, 
+      hashtags: ["#sellfy", "#viral", "#trending"] 
+    };
+  }
 };
 
+// 4. Regenerar solo texto - Adaptado
 export const regenerateCopyOnly = async (productName: string, platform: string, tone: string): Promise<string> => {
-    try {
-        const data = await invokeAI('generate_strategic_copy', {
-            userContext: productName,
-            framework: CopyFramework.PAS,
-            tone,
-            platform
-        });
-        return data?.text || "Texto regenerado. Descubre más en nuestro perfil.";
-    } catch {
-        return "Texto regenerado. Descubre más en nuestro perfil.";
-    }
+  try {
+    const { text } = await invokeAI('generate_strategic_copy', {
+      userContext: productName,
+      framework: CopyFramework.PAS,
+      tone,
+      platform
+    });
+    return text;
+  } catch (e) {
+    console.error(e);
+    return "Error al regenerar texto. Intenta de nuevo.";
+  }
 };
 
-// --- GENERADOR PRINCIPAL ---
+// 5. Animación de Video (Veo)
+export const animateImageWithVeo = async (imageBase64: string): Promise<string | null> => {
+  try {
+    const optimizedImage = await optimizeImageForUpload(imageBase64);
+    
+    // Paso 1: Iniciar operación
+    const { operationName } = await invokeAI('animate_image', {
+      image: optimizedImage
+    });
 
-const generateVariantContent = async (
-  index: number, 
-  angle: string, 
-  state: WizardState, 
-  settings: BusinessSettings,
-  plan: PlanTier
-): Promise<ContentVariant> => {
-    
-    let mediaUrl: string;
-    
+    if (!operationName) throw new Error("No se recibió ID de operación");
+
+    // Paso 2: Polling (Preguntar estado)
+    let attempts = 0;
+    const maxAttempts = 24; // ~2 minutos (5s intervalo)
+
+    while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 5000));
+        attempts++;
+        
+        const status = await invokeAI('get_video_operation', { operationName });
+        
+        if (status.done && status.videoUri) {
+            return status.videoUri; 
+        }
+    }
+    return null;
+  } catch (e) {
+    console.error("Animation Error:", e);
+    return null;
+  }
+};
+
+// --- ORQUESTADOR PRINCIPAL ---
+
+const generateVariantContent = async (index: number, angle: string, state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<ContentVariant> => {
+    const { productData, platform, contentType } = state;
+    const isVideoRequest = contentType === ContentType.VIDEO_REEL || platform === Platform.TIKTOK || platform === Platform.IG_REELS;
+
+    let mediaUrl: string | null = null;
+    let isVideoResult = false;
+    let textData = { copy: "", hashtags: [] as string[] };
+
     try {
-        // 1. Optimizar imagen base
         const optimizedBase = await optimizeImageForUpload(state.productData.baseImage || "");
 
-        // 2. Llamada REAL a Gemini (Image-to-Image)
-        console.log(`Generando visual ${index}...`);
-        const visualResponse = await invokeAI('generate_visual', {
-            state: { ...state, productData: { ...state.productData, baseImage: optimizedBase } }, // Enviar optimizada
-            angle,
-            plan // Enviamos el plan al backend por si se requiere lógica diferente (ej. HD vs SD)
-        });
-        
-        mediaUrl = visualResponse.url;
+        // Ejecutar generación visual y textual en paralelo
+        const [mediaResponse, copyResponse] = await Promise.all([
+            invokeAI('generate_visual', {
+                state: { ...state, productData: { ...state.productData, baseImage: optimizedBase } },
+                angle,
+                plan,
+                isVideoRequest
+            }),
+            generateVariantCopy(state, settings, angle)
+        ]);
+
+        mediaUrl = mediaResponse.url;
+        isVideoResult = mediaResponse.isVideo;
+        textData = copyResponse;
 
     } catch (e) {
-        console.error("Fallo generación imagen:", e);
-        // Fallback visual de error (texto sobre negro)
-        mediaUrl = `https://placehold.co/1080x1350/000000/FFF?text=Error+Generando+Imagen`;
-    }
-
-    // 3. Generar Copy (Simple)
-    let copyText = "";
-    try {
-        const copyRes = await invokeAI('generate_strategic_copy', {
-            userContext: `${state.productData.name} - ${state.productData.benefit}`,
-            framework: CopyFramework.AIDA,
-            tone: settings.tone,
-            platform: state.platform
-        });
-        copyText = copyRes.text;
-    } catch {
-        copyText = `🔥 ${state.productData.name} \n\n${state.productData.benefit}`;
+        console.error("Fallo generando variante:", e);
+        // Fallback visual si falla la IA
+        mediaUrl = `https://placehold.co/1080x1350/1e293b/ffffff?text=${encodeURIComponent(productData.name || 'Error')}`;
+        
+        // Intentamos recuperar texto aunque falle la imagen
+        textData = await generateVariantCopy(state, settings, angle).catch(() => ({ copy: productData.name || "Producto", hashtags: [] }));
     }
 
     return {
         id: `var-${Date.now()}-${index}`,
-        image: mediaUrl,
-        isVideo: false,
-        copy: copyText,
-        hashtags: ["#trend", "#viral"],
-        angle: angle,
-        debugPrompt: `Gemini i2i: ${angle}`
+        image: mediaUrl || "",
+        isVideo: isVideoResult,
+        copy: textData.copy || "",
+        hashtags: textData.hashtags || [],
+        angle: angle
     };
 };
 
-export const generateCampaign = async (
-  state: WizardState, 
-  settings: BusinessSettings, 
-  plan: PlanTier
-): Promise<CampaignResult> => {
-  
-  const isVideo = state.contentType === ContentType.VIDEO_REEL || 
-                  state.platform === Platform.TIKTOK || 
-                  state.platform === Platform.IG_REELS;
+export const generateCampaign = async (state: WizardState, settings: BusinessSettings, plan: PlanTier): Promise<CampaignResult> => {
+  const isVideo = state.contentType === ContentType.VIDEO_REEL || state.platform === Platform.TIKTOK || state.platform === Platform.IG_REELS;
   
   const angles = isVideo 
-      ? ["Cinematic Reveal", "Close Up"] 
-      : ["Hero Shot", "Lifestyle Context", "Creative Angle", "Detail Shot"];
+      ? ["Dynamic Reveal", "Lifestyle Usage", "Cinematic Mood", "Product Details"] 
+      : ["Hero Shot (Centered)", "Lifestyle Context", "Creative Angle", "Close-up Detail"];
 
   const variants: ContentVariant[] = [];
   
-  // Procesamiento secuencial para evitar timeouts multiples y rate limits
+  // Generación secuencial
   for (let i = 0; i < angles.length; i++) {
-      const v = await generateVariantContent(i, angles[i], state, settings, plan);
-      variants.push(v);
+      const variant = await generateVariantContent(i, angles[i], state, settings, plan);
+      variants.push(variant);
   }
 
   return {
